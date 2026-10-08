@@ -8,7 +8,7 @@ public final class InstallResult extends BroadcastReceiver {
   String message=i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
   c.getSharedPreferences("diagnostic",0).edit().putInt("status",status).putString("message",message==null?"":message).putBoolean("busy",false).commit();
   if(status==PackageInstaller.STATUS_PENDING_USER_ACTION)
-   MainActivity.pending=i.getParcelableExtra(Intent.EXTRA_INTENT,Intent.class);
+   MainActivity.pending=i.getParcelableExtra(Intent.EXTRA_INTENT);
   MainActivity.changed();
  }
 }
