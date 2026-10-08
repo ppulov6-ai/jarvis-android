@@ -13,7 +13,7 @@ def texts(tree):
  return "\n".join(n.get("text","") for n in tree.iter("node"))
 def click(tree,label):
  for n in tree.iter("node"):
-  if n.get("text")==label and n.get("enabled")=="true":
+  if n.get("text","").casefold()==label.casefold() and n.get("enabled")=="true":
    import re
    x1,y1,x2,y2=map(int,re.findall(r"\d+",n.get("bounds")))
    adb("shell","input","tap",str((x1+x2)//2),str((y1+y2)//2));return True
@@ -33,19 +33,26 @@ def wait(expected,name):
   time.sleep(1)
  raise RuntimeError(name+" missing expected status; UI: "+txt)
 Path("evidence").mkdir(exist_ok=True)
+import atexit
+def save_exit():
+ try:
+  Path("evidence/final-ui.xml").write_text(snapshot()[0])
+  Path("evidence/logcat.txt").write_text(adb("logcat","-d","-v","threadtime",check=False))
+ except Exception as e: print("Diagnostic capture:",e)
+atexit.register(save_exit)
 for p in [1,2]:
  adb("uninstall","ru.pulat.jarvis",check=False)
  adb("uninstall","ru.pulat.jarvis.installcheck",check=False)
  assert "Success" in adb("install","--no-streaming","diagnostic-apk/Jarvis-install-check.apk")
  launch();s,t=snapshot()
- assert click(t,"Установить новую версию")
+ assert click(t,"Установить новую версию"),texts(t)
  time.sleep(1);s,t=snapshot()
  assert "Allow from this source" in texts(t),texts(t)
  Path("evidence/permission-"+str(p)+".xml").write_text(s)
  adb("shell","input","keyevent","4")
  adb("shell","appops","set","ru.pulat.jarvis.installcheck","REQUEST_INSTALL_PACKAGES","allow")
  launch();s,t=snapshot()
- assert click(t,"Установить новую версию")
+ assert click(t,"Установить новую версию"),texts(t)
  wait(0,"clean-"+str(p))
  s,t=snapshot();assert click(t,"Отправить отчёт")
  time.sleep(1)
@@ -54,6 +61,6 @@ for p in [1,2]:
  adb("uninstall","ru.pulat.jarvis")
  assert "Success" in adb("install","--no-streaming","old.apk")
  launch();s,t=snapshot()
- assert click(t,"Установить новую версию")
+ assert click(t,"Установить новую версию"),texts(t)
  wait(4,"conflict-"+str(p))
 print("Two clean installs, two signing conflicts, permission and report paths verified")
