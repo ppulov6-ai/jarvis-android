@@ -118,3 +118,34 @@ func TestFormatSpecifierConsistency(t *testing.T) {
 		}
 	}
 }
+
+// TestRussianCatalogComplete ensures Russian never falls back to English for
+// registered messages and preserves every formatting argument in order.
+func TestRussianCatalogComplete(t *testing.T) {
+	re := regexp.MustCompile(`%[sdvfgqxobt]`)
+	for key, enValue := range messages["en"] {
+		ruValue, ok := messages["ru"][key]
+		if !ok || ruValue == "" {
+			t.Errorf("missing Russian translation for %q", key)
+			continue
+		}
+		enSpecs := re.FindAllString(enValue, -1)
+		ruSpecs := re.FindAllString(ruValue, -1)
+		if len(enSpecs) != len(ruSpecs) {
+			t.Errorf("Russian format count mismatch for %q: %v != %v", key, enSpecs, ruSpecs)
+			continue
+		}
+		for i := range enSpecs {
+			if enSpecs[i] != ruSpecs[i] {
+				t.Errorf("Russian format mismatch for %q: %v != %v", key, enSpecs, ruSpecs)
+				break
+			}
+		}
+	}
+	if got := T("ru-RU", "status.thinking"); got != "Думаю..." {
+		t.Errorf("Russian locale resolution: got %q", got)
+	}
+	if got := Tf("ru", "status.searching_q", "Джарвис"); got != "Ищу... (Джарвис)" {
+		t.Errorf("Russian formatting: got %q", got)
+	}
+}
