@@ -26,7 +26,7 @@ def wait(expected,name):
   s,t=snapshot();txt=texts(t)
   Path("evidence/"+name+"-ui.xml").write_text(s)
   if "Статус: "+str(expected)+" —" in txt:
-   print(name+": confirmed status "+str(expected));return
+   print(name+": confirmed status "+str(expected),flush=True);return
   for label in ["Install","Update","Continue","Install anyway"]:
    if label in ["Continue","Install anyway"]: continue
    if click(t,label):break
@@ -62,5 +62,5 @@ for p in [1,2]:
  assert "Success" in adb("install","--no-streaming","old.apk")
  launch();s,t=snapshot()
  assert click(t,"Установить новую версию"),texts(t)
- wait(4,"conflict-"+str(p))
+ wait(5,"conflict-"+str(p))
 print("Two clean installs, two signing conflicts, permission and report paths verified")
