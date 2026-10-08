@@ -187,7 +187,7 @@ class AssistantManager(
                             } catch (e: Exception) {
                                 Log.w(TAG, "Failed to send message", e)
                                 _state.update {
-                                    it.copy(phase = VoicePhase.ERROR, errorMessage = "Failed to send")
+                                    it.copy(phase = VoicePhase.ERROR, errorMessage = "Не удалось отправить сообщение")
                                 }
                                 delay(2000)
                                 return@onReceive
@@ -245,7 +245,7 @@ class AssistantManager(
                     WaitResult.Timeout -> {
                         if (!hasSpoken) {
                             _state.update {
-                                it.copy(phase = VoicePhase.ERROR, errorMessage = "Response timed out")
+                                it.copy(phase = VoicePhase.ERROR, errorMessage = "Время ожидания ответа истекло")
                             }
                             delay(2000)
                         }
@@ -316,7 +316,7 @@ class AssistantManager(
                         _state.update {
                             it.copy(
                                 phase = VoicePhase.ERROR,
-                                errorMessage = "Speech recognition error (code=${result.code})"
+                                errorMessage = "Ошибка распознавания речи (код=${result.code})"
                             )
                         }
                         delay(2000)

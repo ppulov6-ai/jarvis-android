@@ -12,7 +12,7 @@ const (
 	// Action is the intent action the Android app listens for.
 	Action = "io.clawdroid.AGENT_MESSAGE"
 	// Package is the Android app package name.
-	Package = "io.clawdroid"
+	Package = "ru.pulat.jarvis"
 )
 
 // Message represents a message to send via Android broadcast.
