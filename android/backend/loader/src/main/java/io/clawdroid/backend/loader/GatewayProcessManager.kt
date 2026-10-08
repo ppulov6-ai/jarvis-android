@@ -93,6 +93,8 @@ class GatewayProcessManager(
         pb.environment().putAll(SecretVault(context).environment())
         pb.environment().putAll(env)
         pb.environment()["CLAWDROID_ANDROID_SECURE_SECRETS"] = "true"
+        // Keep the gateway ready without periodic requests to the model.
+        pb.environment()["CLAWDROID_HEARTBEAT_ENABLED"] = "false"
         pb.directory(context.filesDir)
         pb.redirectErrorStream(true)
 

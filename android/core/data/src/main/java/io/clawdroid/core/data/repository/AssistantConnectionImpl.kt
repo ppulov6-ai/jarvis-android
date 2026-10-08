@@ -2,6 +2,11 @@ package io.clawdroid.core.data.repository
 
 import android.content.Context
 import android.util.Log
+import io.clawdroid.core.domain.local.LocalCommandHandler
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import io.ktor.client.HttpClient
 import io.clawdroid.core.data.remote.WebSocketClient
 import io.clawdroid.core.data.remote.dto.ToolRequest
@@ -33,12 +38,15 @@ typealias ToolRequestCallback = suspend (ToolRequest) -> String
 class AssistantConnectionImpl(
     private val httpClient: HttpClient,
     private val context: Context,
-    apiKeyProvider: () -> String = { "" }
+    apiKeyProvider: () -> String = { "" },
+    socket: WebSocketClient? = null,
+    connectionScope: CoroutineScope? = null
 ) : AssistantConnection {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = connectionScope ?: CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val clientId = UUID.randomUUID().toString()
-    private val wsClient = WebSocketClient(httpClient, scope, clientId, "assistant", context = context, apiKeyProvider = apiKeyProvider)
+    private val wsClient = socket ?: WebSocketClient(httpClient, scope, clientId, "assistant", context = context, apiKeyProvider = apiKeyProvider)
+    private val requestLock = Any()
     private val generation = AtomicLong(0)
     private val toolJobs = ConcurrentHashMap<String, Job>()
 
@@ -51,6 +59,11 @@ class AssistantConnectionImpl(
     override val statusText: StateFlow<String?> = _statusText.asStateFlow()
 
     override val connectionState: StateFlow<ConnectionState> = wsClient.connectionState
+
+    var localCommands: LocalCommandHandler? = null
+    private val localJob = java.util.concurrent.atomic.AtomicReference<Job?>(null)
+    @Volatile private var remoteActive = false
+    override fun isLocalCommand(text: String) = localCommands?.handles(text) == true
 
     var onToolRequest: ToolRequestCallback? = null
     var onExit: ((String?) -> Unit)? = null
@@ -115,7 +128,12 @@ class AssistantConnectionImpl(
     }
 
     override fun stop() {
-        val next = generation.incrementAndGet()
+        val next = synchronized(requestLock) {
+            localJob.getAndSet(null)?.cancel()
+            localCommands?.reset()
+            remoteActive = false
+            generation.incrementAndGet()
+        }
         toolJobs.values.forEach { it.cancel() }
         toolJobs.clear()
         _statusText.value = null
@@ -129,8 +147,37 @@ class AssistantConnectionImpl(
     }
 
     override suspend fun send(text: String, images: List<String>, inputMode: String) {
+        val next = synchronized(requestLock) {
+            localJob.getAndSet(null)?.cancel()
+            generation.incrementAndGet()
+        }
         toolJobs.values.forEach { it.cancel() }
-        val next = generation.incrementAndGet()
+        val local = localCommands
+        if (local?.handles(text) == true) {
+            if (remoteActive) wsClient.send(WsIncoming(content = "", type = "cancel", generation = next))
+            remoteActive = false
+            _statusText.value = "Выполняю на телефоне"
+            try {
+                val result = coroutineScope {
+                    val job = async(start = CoroutineStart.LAZY) { local.execute(text) }
+                    val registered = synchronized(requestLock) {
+                        if (generation.get() != next) false else {
+                            localJob.set(job)
+                            true
+                        }
+                    }
+                    if (registered) job.start() else job.cancel()
+                    try { job.await() } finally { localJob.compareAndSet(job, null) }
+                }
+                currentCoroutineContext().ensureActive()
+                if (generation.get() == next) _messages.emit(AssistantMessage(content = result.content))
+            } finally {
+                if (generation.get() == next) { _statusText.value = null }
+            }
+            return
+        }
+        local?.reset()
+        remoteActive = true
         val dto = WsIncoming(
             generation = next,
             content = text,

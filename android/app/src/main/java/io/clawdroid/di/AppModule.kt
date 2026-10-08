@@ -100,6 +100,7 @@ val appModule = module {
             onAccessibilityNeeded = {},
             onStop = { repo.stop() }
         )
+        repo.localCommands = io.clawdroid.core.domain.local.LocalCommandRouter(io.clawdroid.assistant.AndroidLocalCommandPlatform(androidContext(), handler))
         repo.onToolRequest = { request ->
             val response = handler.handle(request)
             if (response.success) response.result ?: "" else "error: ${response.error ?: "Неизвестная ошибка"}"

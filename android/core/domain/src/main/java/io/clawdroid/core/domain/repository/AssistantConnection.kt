@@ -10,6 +10,7 @@ interface AssistantConnection {
     val statusText: StateFlow<String?>
     val connectionState: StateFlow<ConnectionState>
 
+    fun isLocalCommand(text: String): Boolean = false
     fun connect(wsUrl: String)
     fun stop() {}
     fun disconnect()

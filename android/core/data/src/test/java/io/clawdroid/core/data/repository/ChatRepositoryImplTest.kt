@@ -98,6 +98,59 @@ class ChatRepositoryImplTest {
         assertEquals(connectionStateFlow, repository.connectionState)
     }
 
+    @Test
+    fun `local contacts work while disconnected without websocket or image upload`() = runTest {
+        val local = mockk<io.clawdroid.core.domain.local.LocalCommandHandler>()
+        every { local.handles("найди контакт Мама") } returns true
+        coEvery { local.execute(any()) } returns io.clawdroid.core.domain.local.LocalCommandResult("Мама: 111")
+        repository.localCommands = local
+        repository.sendMessage("найди контакт Мама", emptyList(), "voice")
+        coVerify(exactly = 0) { webSocketClient.send(any<WsIncoming>()) }
+        coVerify(exactly = 0) { imageFileStorage.saveFromUri(any()) }
+        coVerify { messageDao.insert(match { it.sender == "AGENT" && it.content == "Мама: 111" && it.status == "RECEIVED" }) }
+        verify(exactly = 0) { webSocketClient.disconnect() }
+    }
+
+    @Test
+    fun `recognized local failure does not fall back to the model`() = runTest {
+        val local = mockk<io.clawdroid.core.domain.local.LocalCommandHandler>()
+        every { local.handles(any()) } returns true
+        coEvery { local.execute(any()) } returns io.clawdroid.core.domain.local.LocalCommandResult("Нет разрешения")
+        repository.localCommands = local
+        repository.sendMessage("найди контакт Мама")
+        coVerify(exactly = 0) { webSocketClient.send(any<WsIncoming>()) }
+    }
+
+    @Test
+    fun `explicitly attached image keeps analysis path instead of being silently discarded`() = runTest {
+        val local = mockk<io.clawdroid.core.domain.local.LocalCommandHandler>(relaxed = true)
+        every { local.handles(any()) } returns true
+        repository.localCommands = local
+        coEvery { imageFileStorage.saveFromUri(any()) } returns ImageFileStorage.SaveResult(ImageData("/test.jpg", 10, 10), "image")
+        coEvery { webSocketClient.send(any<WsIncoming>()) } returns true
+        repository.sendMessage("найди контакт Мама", listOf(ImageAttachment("content://test")))
+        coVerify(exactly = 0) { local.execute(any()) }
+        coVerify { webSocketClient.send(match<WsIncoming> { it.content == "найди контакт Мама" && it.images == listOf("image") }) }
+    }
+
+    @Test
+    fun `stop cancels local permission wait and suppresses stale result`() = runTest {
+        val local = mockk<io.clawdroid.core.domain.local.LocalCommandHandler>(relaxed = true)
+        val wait = kotlinx.coroutines.CompletableDeferred<Unit>()
+        every { local.handles(any()) } returns true
+        coEvery { local.execute(any()) } coAnswers { wait.await(); io.clawdroid.core.domain.local.LocalCommandResult("stale") }
+        repository.localCommands = local
+        val task = launch { repository.sendMessage("позвони Мама") }
+        testScheduler.runCurrent()
+        repository.stop()
+        testScheduler.runCurrent()
+        wait.complete(Unit)
+        task.join()
+        coVerify(exactly = 0) { messageDao.insert(match { it.content == "stale" }) }
+        verify { local.reset() }
+        coVerify(exactly = 0) { webSocketClient.send(match<WsIncoming> { it.type != "cancel" }) }
+    }
+
     @Nested
     inner class SendMessage {
 

@@ -131,10 +131,12 @@ class VoiceModeManager(
                         if (!text.isNullOrBlank()) {
                             _state.update { it.copy(phase = VoicePhase.SENDING, recognizedText = text) }
                             try {
-                                val images = if (_state.value.isCameraActive) {
+                                val images = if (!sendMessage.isLocalCommand(text) && _state.value.isCameraActive) {
                                     listOfNotNull(cameraCaptureManager.captureFrame())
                                 } else emptyList()
                                 sendMessage(text, images = images, inputMode = "voice")
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
                             } catch (e: Exception) {
                                 _state.update {
                                     it.copy(phase = VoicePhase.ERROR, errorMessage = "Не удалось отправить сообщение")

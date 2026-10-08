@@ -59,7 +59,7 @@ class ActionConfirmationActivity : Activity() {
             "text" -> "Ввод текста"
             "keyevent" -> "Нажатие клавиши"
             "intent", "broadcast" -> "Команда другому приложению"
-            "screenshot" -> "Передача снимка экрана модели"
+            "screenshot" -> if (request.params?.get("local_only")?.toString() == "true") "Сохранение снимка на телефоне без передачи модели" else "Передача снимка экрана модели"
             "compose_sms" -> "Подготовка SMS"
             "compose_email" -> "Подготовка письма"
             "dial" -> "Открытие набора номера"

@@ -182,10 +182,12 @@ class AssistantManager(
                         if (!text.isNullOrBlank()) {
                             _state.update { it.copy(phase = VoicePhase.SENDING, recognizedText = text, chatHistory = it.chatHistory + ChatTurn("user", text)) }
                             try {
-                                val base64Images = if (_state.value.isCameraActive || _state.value.isScreenCaptureActive) {
+                                val base64Images = if (!connection.isLocalCommand(text) && (_state.value.isCameraActive || _state.value.isScreenCaptureActive)) {
                                     captureAndEncode()
                                 } else emptyList()
                                 connection.send(text, base64Images)
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
                             } catch (e: Exception) {
                                 Log.w(TAG, "Failed to send message", e)
                                 _state.update {

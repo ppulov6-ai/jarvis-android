@@ -67,7 +67,7 @@ fun MessageBubble(
                     } else 1f
 
                     AsyncImage(
-                        model = File(imageData.path),
+                        model = if (imageData.path.startsWith("content://")) imageData.path else File(imageData.path),
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxWidth()

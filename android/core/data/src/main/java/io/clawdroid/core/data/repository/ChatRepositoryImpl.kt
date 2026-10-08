@@ -1,6 +1,12 @@
 package io.clawdroid.core.data.repository
 
 import android.util.Log
+import io.clawdroid.core.domain.local.LocalCommandHandler
+import io.clawdroid.core.domain.model.MessageSender
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import io.clawdroid.core.data.local.ImageFileStorage
 import io.clawdroid.core.data.local.dao.MessageDao
 import io.clawdroid.core.data.mapper.MessageMapper
@@ -36,10 +42,17 @@ class ChatRepositoryImpl(
     private val imageFileStorage: ImageFileStorage
 ) : ChatRepository {
 
+    private val requestLock = Any()
     private val generation = AtomicLong(0)
     private val toolJobs = ConcurrentHashMap<String, Job>()
 
     private val json = Json { ignoreUnknownKeys = true }
+    var localCommands: LocalCommandHandler? = null
+    private val localJob = java.util.concurrent.atomic.AtomicReference<Job?>(null)
+    @Volatile private var remoteActive = false
+
+    override fun isLocalCommand(text: String) = localCommands?.handles(text) == true
+
     var onToolRequest: (suspend (ToolRequest) -> String)? = null
 
     private val _displayLimit = MutableStateFlow(INITIAL_LOAD_COUNT)
@@ -82,11 +95,44 @@ class ChatRepositoryImpl(
     }
 
     override suspend fun sendMessage(text: String, images: List<ImageAttachment>, inputMode: String?) {
+        val next = synchronized(requestLock) {
+            localJob.getAndSet(null)?.cancel()
+            generation.incrementAndGet()
+        }
+        toolJobs.values.forEach { it.cancel() }
+        val local = localCommands
+        if (images.isEmpty() && local?.handles(text) == true) {
+            if (remoteActive) webSocketClient.send(WsIncoming(content = "", type = "cancel", generation = next))
+            remoteActive = false
+            _statusLabel.value = "Выполняю на телефоне"
+            messageDao.insert(MessageMapper.toEntity(text, emptyList(), MessageStatus.SENT))
+            try {
+                val result = coroutineScope {
+                    val job = async(start = CoroutineStart.LAZY) { local.execute(text) }
+                    val registered = synchronized(requestLock) {
+                        if (generation.get() != next) false else {
+                            localJob.set(job)
+                            true
+                        }
+                    }
+                    if (registered) job.start() else job.cancel()
+                    try { job.await() } finally { localJob.compareAndSet(job, null) }
+                }
+                currentCoroutineContext().ensureActive()
+                if (generation.get() != next) return
+                val reply = MessageMapper.toEntity(result.content, result.images, MessageStatus.RECEIVED)
+                    .copy(sender = MessageSender.AGENT.name)
+                messageDao.insert(reply)
+            } finally {
+                if (generation.get() == next) { _statusLabel.value = null }
+            }
+            return
+        }
+        local?.reset()
+        remoteActive = true
         val results = images.map { imageFileStorage.saveFromUri(it.uri) }
         val entity = MessageMapper.toEntity(text, results.map { it.imageData }, MessageStatus.SENDING)
         messageDao.insert(entity)
-        toolJobs.values.forEach { it.cancel() }
-        val next = generation.incrementAndGet()
         val wsDto = MessageMapper.toWsIncoming(text, results.map { it.base64 }, inputMode).copy(generation = next)
         val success = webSocketClient.send(wsDto)
         messageDao.update(entity.copy(status = if (success) MessageStatus.SENT.name else MessageStatus.FAILED.name))
@@ -102,7 +148,12 @@ class ChatRepositoryImpl(
     }
 
     override fun stop() {
-        val next = generation.incrementAndGet()
+        val next = synchronized(requestLock) {
+            localJob.getAndSet(null)?.cancel()
+            localCommands?.reset()
+            remoteActive = false
+            generation.incrementAndGet()
+        }
         toolJobs.values.forEach { it.cancel() }
         toolJobs.clear()
         _statusLabel.value = null

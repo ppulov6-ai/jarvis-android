@@ -132,6 +132,7 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
             onAccessibilityNeeded = { showAccessibilityGuide = true },
             onStop = { shutdown() }
         )
+        (connection as AssistantConnectionImpl).localCommands = io.clawdroid.core.domain.local.LocalCommandRouter(AndroidLocalCommandPlatform(applicationContext, toolRequestHandler))
         (connection as AssistantConnectionImpl).onToolRequest = { request ->
             val response = toolRequestHandler.handle(request)
             if (response.success) {

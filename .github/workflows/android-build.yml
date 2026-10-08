@@ -36,13 +36,29 @@ jobs:
         run: |
           gofmt -w pkg
           make generate
-          go test ./...
+          go test -count=2 ./...
           make build-android-arm64
       - name: Проверить Android и собрать APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --stacktrace
+          ./gradlew clean :core:domain:testDebugUnitTest :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --no-build-cache --rerun-tasks --stacktrace
+      - name: Повторить Android проверки и APK из чистого состояния
+        working-directory: android
+        run: |
+          ./gradlew clean :core:domain:testDebugUnitTest :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --no-build-cache --rerun-tasks --stacktrace
+      - name: Вывести ошибки тестов
+        if: always()
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for report in Path('android').glob('**/build/test-results/**/*.xml'):
+              for case in ET.parse(report).getroot().iter('testcase'):
+                  for failure in case.findall('failure') + case.findall('error'):
+                      print(case.get('classname'), case.get('name'), failure.get('message'))
+                      print((failure.text or '')[:7000])
+          PYCODE
       - name: Сохранить проверочную сборку APK
         uses: actions/upload-artifact@v4
         with:
@@ -72,4 +88,4 @@ jobs:
           test "${#files[@]}" -eq 1
           cp "${files[0]}" Jarvisjon-ru-arm64.apk
           tag="android-${GITHUB_SHA:0:12}"
-          gh release create "$tag" Jarvisjon-ru-arm64.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Джарвисджон: Responses API и космо-шарик" --notes "Проверочная сборка ARM64. Подключение одним API-ключом OpenAI, русский интерфейс, космо-шарик, подтверждение действий и Стоп. Работа на физическом телефоне требует проверки."
+          gh release create "$tag" Jarvisjon-ru-arm64.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Джарвисджон 0.4.3: локальные команды" --notes "Поиск контактов, выбор номера, открытие набора и сохранение скриншота работают локально без запроса к OpenAI. Фоновые периодические запросы модели отключены. Подключение и ключ сохраняются. Go и Android проверяются дважды, обе APK сборки из чистого состояния. Работа на физическом Samsung требует проверки."
