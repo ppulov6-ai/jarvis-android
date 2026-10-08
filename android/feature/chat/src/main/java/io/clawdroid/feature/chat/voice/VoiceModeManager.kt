@@ -135,7 +135,7 @@ class VoiceModeManager(
                                 sendMessage(text, images = images, inputMode = "voice")
                             } catch (e: Exception) {
                                 _state.update {
-                                    it.copy(phase = VoicePhase.ERROR, errorMessage = "送信に失敗しました")
+                                    it.copy(phase = VoicePhase.ERROR, errorMessage = "Не удалось отправить сообщение")
                                 }
                                 delay(2000)
                                 return@onReceive
@@ -187,7 +187,7 @@ class VoiceModeManager(
                 when (result) {
                     WaitResult.Timeout -> {
                         _state.update {
-                            it.copy(phase = VoicePhase.ERROR, errorMessage = "応答がタイムアウトしました")
+                            it.copy(phase = VoicePhase.ERROR, errorMessage = "Время ожидания ответа истекло")
                         }
                         delay(2000)
                         return@coroutineScope
@@ -246,7 +246,7 @@ class VoiceModeManager(
                         _state.update {
                             it.copy(
                                 phase = VoicePhase.ERROR,
-                                errorMessage = "音声認識エラー (code=${result.code})"
+                                errorMessage = "Ошибка распознавания речи (код=${result.code})"
                             )
                         }
                         delay(2000)

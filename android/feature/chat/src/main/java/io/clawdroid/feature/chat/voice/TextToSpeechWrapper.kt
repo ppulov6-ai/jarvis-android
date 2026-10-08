@@ -83,8 +83,7 @@ class TextToSpeechWrapper(
         val selected = localRussianVoices.firstOrNull { it.name == currentConfig.voiceName }
             ?: localRussianVoices.firstOrNull()
             ?: return false
-        engine.voice = selected
-        return true
+        return engine.setVoice(selected) == TextToSpeech.SUCCESS
     }
 
     suspend fun speak(text: String): Boolean = suspendCancellableCoroutine { cont ->

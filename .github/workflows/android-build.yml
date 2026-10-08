@@ -26,8 +26,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Подготовить Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Проверить установленный Android SDK
+        run: |
+          test -d "$ANDROID_HOME"
+          test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
       - name: Подготовить Gradle
         uses: gradle/actions/setup-gradle@v4
       - name: Проверить Go и собрать встроенный модуль

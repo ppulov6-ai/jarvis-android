@@ -113,7 +113,7 @@ class SettingsViewModelTest {
 
         viewModel.onTestSpeak()
 
-        coVerify { ttsWrapper.speak("これはテスト音声です。This is a test.") }
+        coVerify { ttsWrapper.speak("Это проверка голоса. Джарвис готов к работе.") }
         assertFalse(viewModel.uiState.value.isTesting)
     }
 }

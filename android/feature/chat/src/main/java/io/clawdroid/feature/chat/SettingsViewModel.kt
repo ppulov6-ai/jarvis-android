@@ -57,7 +57,7 @@ class SettingsViewModel(
     fun onTestSpeak() {
         viewModelScope.launch {
             _uiState.update { it.copy(isTesting = true) }
-            ttsWrapper.speak("これはテスト音声です。This is a test.")
+            ttsWrapper.speak("Это проверка голоса. Джарвис готов к работе.")
             _uiState.update { it.copy(isTesting = false) }
         }
     }
