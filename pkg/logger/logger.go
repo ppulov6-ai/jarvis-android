@@ -54,11 +54,11 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 	}
 
 	if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
-        // Payloads, provider errors and tool arguments can contain user secrets.
-        message = "Событие компонента: " + component
-        fields = nil
-    }
-    entry := LogEntry{
+		// Payloads, provider errors and tool arguments can contain user secrets.
+		message = "Событие компонента: " + component
+		fields = nil
+	}
+	entry := LogEntry{
 		Level:     logLevelNames[level],
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Component: component,

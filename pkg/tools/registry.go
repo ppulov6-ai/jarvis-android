@@ -3,8 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
- "os"
- "path/filepath"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -13,15 +13,15 @@ import (
 )
 
 type ToolRegistry struct {
-	tools map[string]Tool
-	mu    sync.RWMutex
- secureEmbedded bool
+	tools          map[string]Tool
+	mu             sync.RWMutex
+	secureEmbedded bool
 }
 
 func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
-		tools: make(map[string]Tool),
- secureEmbedded: os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true",
+		tools:          make(map[string]Tool),
+		secureEmbedded: os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true",
 	}
 }
 
@@ -29,22 +29,34 @@ func (r *ToolRegistry) Register(tool Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.secureEmbedded {
-  if !embeddedToolAllowed(tool) { return }
-  workspace, err := embeddedWorkspace()
-  if err != nil { return }
-  switch fileTool := tool.(type) {
-  case *ReadFileTool: copy := *fileTool; copy.workspace, copy.restrict = workspace, true; tool = &copy
-  case *ListDirTool: copy := *fileTool; copy.workspace, copy.restrict = workspace, true; tool = &copy
-  }
- }
- r.tools[tool.Name()] = tool
+		if !embeddedToolAllowed(tool) {
+			return
+		}
+		workspace, err := embeddedWorkspace()
+		if err != nil {
+			return
+		}
+		switch fileTool := tool.(type) {
+		case *ReadFileTool:
+			copy := *fileTool
+			copy.workspace, copy.restrict = workspace, true
+			tool = &copy
+		case *ListDirTool:
+			copy := *fileTool
+			copy.workspace, copy.restrict = workspace, true
+			tool = &copy
+		}
+	}
+	r.tools[tool.Name()] = tool
 }
 
 func (r *ToolRegistry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	tool, ok := r.tools[name]
- if r.secureEmbedded && ok && !embeddedToolAllowed(tool) { return nil, false }
+	if r.secureEmbedded && ok && !embeddedToolAllowed(tool) {
+		return nil, false
+	}
 	return tool, ok
 }
 
@@ -72,25 +84,36 @@ func (r *ToolRegistry) ExecuteWithContext(ctx context.Context, name string, args
 	}
 
 	// Android execution uses its own copy: shared channel/chat state must never
- // route a request from one concurrent session to another device.
- if exitTool, ok := tool.(*ExitTool); ok { execution := *exitTool; tool = &execution }
- if androidTool, ok := tool.(*AndroidTool); ok {
-  execution := *androidTool
-  execution.channel, execution.chatID = channel, chatID
-  execution.clientType, _ = ctx.Value(androidClientTypeKey{}).(string)
-  tool = &execution
- }
+	// route a request from one concurrent session to another device.
+	if exitTool, ok := tool.(*ExitTool); ok {
+		execution := *exitTool
+		tool = &execution
+	}
+	if androidTool, ok := tool.(*AndroidTool); ok {
+		execution := *androidTool
+		execution.channel, execution.chatID = channel, chatID
+		execution.clientType, _ = ctx.Value(androidClientTypeKey{}).(string)
+		tool = &execution
+	}
 
- if r.secureEmbedded {
-  workspace, err := embeddedWorkspace()
-  if err != nil { return ErrorResult(err.Error()) }
-  switch fileTool := tool.(type) {
-  case *ReadFileTool: copy := *fileTool; copy.workspace, copy.restrict = workspace, true; tool = &copy
-  case *ListDirTool: copy := *fileTool; copy.workspace, copy.restrict = workspace, true; tool = &copy
-  }
- }
+	if r.secureEmbedded {
+		workspace, err := embeddedWorkspace()
+		if err != nil {
+			return ErrorResult(err.Error())
+		}
+		switch fileTool := tool.(type) {
+		case *ReadFileTool:
+			copy := *fileTool
+			copy.workspace, copy.restrict = workspace, true
+			tool = &copy
+		case *ListDirTool:
+			copy := *fileTool
+			copy.workspace, copy.restrict = workspace, true
+			tool = &copy
+		}
+	}
 
- // If tool implements ContextualTool, set context
+	// If tool implements ContextualTool, set context
 	if contextualTool, ok := tool.(ContextualTool); ok && channel != "" && chatID != "" {
 		contextualTool.SetContext(channel, chatID)
 	}
@@ -140,7 +163,9 @@ func (r *ToolRegistry) GetDefinitions() []map[string]interface{} {
 
 	definitions := make([]map[string]interface{}, 0, len(r.tools))
 	for _, tool := range r.tools {
- if r.secureEmbedded && !embeddedToolAllowed(tool) { continue }
+		if r.secureEmbedded && !embeddedToolAllowed(tool) {
+			continue
+		}
 		if at, ok := tool.(ActivatableTool); ok && !at.IsActive() {
 			continue
 		}
@@ -157,7 +182,9 @@ func (r *ToolRegistry) ToProviderDefs() []providers.ToolDefinition {
 
 	definitions := make([]providers.ToolDefinition, 0, len(r.tools))
 	for _, tool := range r.tools {
- if r.secureEmbedded && !embeddedToolAllowed(tool) { continue }
+		if r.secureEmbedded && !embeddedToolAllowed(tool) {
+			continue
+		}
 		if at, ok := tool.(ActivatableTool); ok && !at.IsActive() {
 			continue
 		}
@@ -192,7 +219,9 @@ func (r *ToolRegistry) List() []string {
 
 	names := make([]string, 0, len(r.tools))
 	for name, tool := range r.tools {
- if r.secureEmbedded && !embeddedToolAllowed(tool) { continue }
+		if r.secureEmbedded && !embeddedToolAllowed(tool) {
+			continue
+		}
 		names = append(names, name)
 	}
 	return names
@@ -213,7 +242,9 @@ func (r *ToolRegistry) GetSummaries() []string {
 
 	summaries := make([]string, 0, len(r.tools))
 	for _, tool := range r.tools {
- if r.secureEmbedded && !embeddedToolAllowed(tool) { continue }
+		if r.secureEmbedded && !embeddedToolAllowed(tool) {
+			continue
+		}
 		if at, ok := tool.(ActivatableTool); ok && !at.IsActive() {
 			continue
 		}
@@ -225,31 +256,41 @@ func (r *ToolRegistry) GetSummaries() []string {
 // Embedded Android tools use an explicit concrete-type allowlist. Unknown and
 // future tools fail closed; native mutations pass through Android confirmation.
 func embeddedToolAllowed(tool Tool) bool {
- switch tool.(type) {
- case *AndroidTool, *WebSearchTool, *WebFetchTool, *ReadFileTool, *ListDirTool, *ExitTool:
-  return true
- }
- return false
+	switch tool.(type) {
+	case *AndroidTool, *WebSearchTool, *WebFetchTool, *ReadFileTool, *ListDirTool, *ExitTool:
+		return true
+	}
+	return false
 }
 
 // The trusted workspace must not itself resolve through a symlink into secrets.
 func embeddedWorkspace() (string, error) {
- home := os.Getenv("HOME")
- if !filepath.IsAbs(home) { return "", fmt.Errorf("Защищённая рабочая папка не настроена") }
- // Android may expose its private HOME through a platform-managed alias.
- if canonicalHome, err := filepath.EvalSymlinks(home); err == nil { home = canonicalHome }
- workspace := filepath.Join(home, ".clawdroid", "workspace")
- candidate := workspace
- for {
-  resolved, err := filepath.EvalSymlinks(candidate)
-  if err == nil {
-   if resolved != filepath.Clean(candidate) { return "", fmt.Errorf("Символические ссылки в пути рабочей папки запрещены") }
-   break
-  }
-  if !os.IsNotExist(err) { return "", err }
-  parent := filepath.Dir(candidate)
-  if parent == candidate { return "", err }
-  candidate = parent
- }
- return workspace, nil
+	home := os.Getenv("HOME")
+	if !filepath.IsAbs(home) {
+		return "", fmt.Errorf("Защищённая рабочая папка не настроена")
+	}
+	// Android may expose its private HOME through a platform-managed alias.
+	if canonicalHome, err := filepath.EvalSymlinks(home); err == nil {
+		home = canonicalHome
+	}
+	workspace := filepath.Join(home, ".clawdroid", "workspace")
+	candidate := workspace
+	for {
+		resolved, err := filepath.EvalSymlinks(candidate)
+		if err == nil {
+			if resolved != filepath.Clean(candidate) {
+				return "", fmt.Errorf("Символические ссылки в пути рабочей папки запрещены")
+			}
+			break
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			return "", err
+		}
+		candidate = parent
+	}
+	return workspace, nil
 }

@@ -16,7 +16,7 @@ type SchemaField struct {
 	Depth   int         `json:"depth"`
 	Type    string      `json:"type"`
 	Secret  bool        `json:"secret"`
- Env string `json:"env,omitempty"`
+	Env     string      `json:"env,omitempty"`
 	Default interface{} `json:"default"`
 }
 
@@ -200,7 +200,7 @@ func buildFields(t reflect.Type, v reflect.Value, prefix string, group string, d
 			Depth:   depth,
 			Type:    schemaType,
 			Secret:  config.IsSecretKey(jk),
- Env: sf.Tag.Get("env"),
+			Env:     sf.Tag.Get("env"),
 			Default: defVal,
 		})
 	}

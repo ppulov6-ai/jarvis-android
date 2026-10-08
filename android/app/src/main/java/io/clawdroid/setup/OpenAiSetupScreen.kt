@@ -14,9 +14,22 @@ import androidx.compose.ui.unit.dp
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
-fun OpenAiSetupScreen(onConnected: () -> Unit, onBack: (() -> Unit)? = null, viewModel: OpenAiSetupViewModel = koinViewModel()) {
+fun OpenAiSetupScreen(onConnected: () -> Unit, onBack: (() -> Unit)? = null, onExport: (() -> Unit)? = null, viewModel: OpenAiSetupViewModel = koinViewModel()) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val state by viewModel.uiState.collectAsState()
+    var exportError by remember { mutableStateOf<String?>(null) }
     var showKey by remember { mutableStateOf(false) }
+    val activity = remember(context) {
+        var current: android.content.Context = context
+        while (current is android.content.ContextWrapper && current !is android.app.Activity) current = current.baseContext
+        current as? android.app.Activity
+    }
+    // Screenshots remain available while the key is masked; protect visible secrets only.
+    DisposableEffect(activity, showKey) {
+        if (showKey) activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        else activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
+    }
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.fillMaxSize().imePadding().padding(24.dp).verticalScroll(rememberScrollState()),
@@ -41,6 +54,12 @@ fun OpenAiSetupScreen(onConnected: () -> Unit, onBack: (() -> Unit)? = null, vie
             Button(onClick = { viewModel.connect(onConnected) }, enabled = !state.loading && state.key.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
                 Text(if (state.loading) "Проверка подключения…" else "Подключить")
             }
+            OutlinedButton(onClick = {
+                showKey = false
+                if (onExport != null) onExport() else try { io.clawdroid.diagnostics.DiagnosticsExporter.share(context) }
+                catch (_: Exception) { exportError = "Не удалось выгрузить файл. Повторите попытку." }
+            }, enabled = !state.loading) { Text("Выгрузить тестовый файл") }
+            exportError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Text("Запросы оплачиваются по тарифам OpenAI API. Подписка ChatGPT не оплачивает работу API.", style = MaterialTheme.typography.bodySmall)
         }
     }

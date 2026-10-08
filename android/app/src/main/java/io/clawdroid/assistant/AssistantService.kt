@@ -16,6 +16,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -115,6 +117,8 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
         savedStateRegistryController.performRestore(null)
         super.onCreate()
 
+        io.clawdroid.diagnostics.DiagnosticEvents.initialize(applicationContext)
+        io.clawdroid.diagnostics.DiagnosticEvents.record("assistant", "started")
         serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
         connection = AssistantConnectionImpl(httpClient, applicationContext,
@@ -230,6 +234,7 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
     }
 
     private fun shutdown() {
+        io.clawdroid.diagnostics.DiagnosticEvents.record("assistant", "stopped")
         if (::assistantManager.isInitialized) assistantManager.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -346,7 +351,7 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
                                         indication = null
                                     ) {}
                             ) {
-                                Column(modifier = Modifier.padding(24.dp)) {
+                                Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
                                     Text(
                                         text = getString(io.clawdroid.R.string.assistant_accessibility_title),
                                         style = MaterialTheme.typography.headlineSmall
@@ -356,14 +361,21 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
                                         style = MaterialTheme.typography.bodyMedium,
                                         modifier = Modifier.padding(top = 16.dp)
                                     )
-                                    Row(
+                                    Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(top = 24.dp),
-                                        horizontalArrangement = Arrangement.End
+                                            .padding(top = 12.dp)
                                     ) {
                                         TextButton(onClick = { showAccessibilityGuide = false }) {
                                             Text(getString(io.clawdroid.R.string.action_cancel))
+                                        }
+                                        TextButton(onClick = {
+                                            showAccessibilityGuide = false
+                                            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                android.net.Uri.parse("package:$packageName"))
+                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                        }) {
+                                            Text("О приложении")
                                         }
                                         TextButton(onClick = {
                                             showAccessibilityGuide = false
@@ -418,7 +430,7 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
     private fun buildNotification(): Notification {
         return NotificationCompat.Builder(this, NotificationHelper.ASSISTANT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("ClawDroid Assistant")
+            .setContentTitle("Джарвис")
             .setContentText(getString(io.clawdroid.R.string.assistant_notification_listening))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)

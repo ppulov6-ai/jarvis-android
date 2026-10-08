@@ -5,11 +5,11 @@ import "context"
 // ExitTool sends an "exit" message via WebSocket to terminate the assistant.
 // Only active in voice/assistant input modes (controlled via ActivatableTool).
 type ExitTool struct {
-	sendCallback SendCallbackWithType
- sendContextCallback func(context.Context, string, string, string, string) error
-	channel      string
-	chatID       string
-	inputMode    string
+	sendCallback        SendCallbackWithType
+	sendContextCallback func(context.Context, string, string, string, string) error
+	channel             string
+	chatID              string
+	inputMode           string
 }
 
 func NewExitTool() *ExitTool {
@@ -62,11 +62,17 @@ func (t *ExitTool) Execute(ctx context.Context, args map[string]interface{}) *To
 
 	message, _ := args["message"].(string)
 
-	if ctx.Err() != nil { return ErrorResult("Действие остановлено") }
- if t.sendContextCallback != nil { _ = t.sendContextCallback(ctx, t.channel, t.chatID, message, "exit") } else { _ = t.sendCallback(t.channel, t.chatID, message, "exit") }
+	if ctx.Err() != nil {
+		return ErrorResult("Действие остановлено")
+	}
+	if t.sendContextCallback != nil {
+		_ = t.sendContextCallback(ctx, t.channel, t.chatID, message, "exit")
+	} else {
+		_ = t.sendCallback(t.channel, t.chatID, message, "exit")
+	}
 	return SilentResult("Exit signal sent.")
 }
 
 func (t *ExitTool) SetContextSendCallback(callback func(context.Context, string, string, string, string) error) {
- t.sendContextCallback = callback
+	t.sendContextCallback = callback
 }

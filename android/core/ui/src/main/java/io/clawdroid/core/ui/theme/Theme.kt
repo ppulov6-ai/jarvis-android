@@ -7,7 +7,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
 
-private val FuturisticDarkScheme = darkColorScheme(
+private val JarvisDarkScheme = darkColorScheme(
     primary = NeonCyan,
     onPrimary = DeepBlack,
     primaryContainer = NeonCyan.copy(alpha = 0.15f),
@@ -30,7 +30,7 @@ private val FuturisticDarkScheme = darkColorScheme(
     onError = TextPrimary,
 )
 
-private val FuturisticShapes = Shapes(
+private val JarvisShapes = Shapes(
     small = RoundedCornerShape(8.dp),
     medium = RoundedCornerShape(16.dp),
     large = RoundedCornerShape(24.dp),
@@ -42,9 +42,9 @@ fun ClawDroidTheme(
     content: @Composable () -> Unit
 ) {
     MaterialTheme(
-        colorScheme = FuturisticDarkScheme,
+        colorScheme = JarvisDarkScheme,
         typography = Typography,
-        shapes = FuturisticShapes,
+        shapes = JarvisShapes,
         content = content
     )
 }

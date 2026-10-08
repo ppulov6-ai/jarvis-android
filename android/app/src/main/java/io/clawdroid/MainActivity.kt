@@ -41,7 +41,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         requestNotificationPermissionIfNeeded()
         enableEdgeToEdge()
         setContent {
@@ -75,13 +74,21 @@ class MainActivity : ComponentActivity() {
                             onNavigateBack = { navController.popBackStack() },
                             onNavigateToBackendSettings = { navController.navigate(NavRoutes.BACKEND_SETTINGS) },
                             onNavigateToAppSettings = { navController.navigate(NavRoutes.appSettings()) },
+                            onExportDiagnostics = { navController.navigate(NavRoutes.DIAGNOSTICS) },
+                            onNavigateToPermissions = { navController.navigate(NavRoutes.PERMISSIONS) },
                             onNavigateToOpenAi = { navController.navigate(NavRoutes.OPENAI) },
                             showAdvancedSettings = BuildConfig.FLAVOR != "embedded",
                             onLaunchAssistant = { startActivity(Intent(this@MainActivity, AssistantActivity::class.java)) },
                         )
                     }
+                    composable(NavRoutes.DIAGNOSTICS) {
+                        io.clawdroid.diagnostics.DiagnosticsExportScreen(onBack = { navController.popBackStack() })
+                    }
+                    composable(NavRoutes.PERMISSIONS) {
+                        io.clawdroid.settings.PermissionHelpScreen(onNavigateBack = { navController.popBackStack() })
+                    }
                     composable(NavRoutes.OPENAI) {
-                        OpenAiSetupScreen(onConnected = { navController.popBackStack() }, onBack = { navController.popBackStack() })
+                        OpenAiSetupScreen(onConnected = { navController.popBackStack() }, onBack = { navController.popBackStack() }, onExport = { navController.navigate(NavRoutes.DIAGNOSTICS) })
                     }
                     navigation(
                         route = NavRoutes.BACKEND_SETTINGS,
@@ -133,6 +140,7 @@ class MainActivity : ComponentActivity() {
                     }
                     composable(NavRoutes.SETUP) {
                         SetupWizardScreen(
+                            onExportDiagnostics = { navController.navigate(NavRoutes.DIAGNOSTICS) },
                             onSetupComplete = {
                                 navController.navigate(NavRoutes.CHAT) {
                                     popUpTo(NavRoutes.CHAT) { inclusive = true }

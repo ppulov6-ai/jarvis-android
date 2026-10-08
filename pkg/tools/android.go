@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KarakuriAgent/clawdroid/pkg/bus"
 	"github.com/KarakuriAgent/clawdroid/pkg/config"
- "github.com/KarakuriAgent/clawdroid/pkg/bus"
 	"github.com/google/uuid"
 )
 
@@ -25,10 +25,10 @@ type SendCallbackWithType func(channel, chatID, content, msgType string) error
 
 // toolRequest is the JSON payload sent to the Android device via WebSocket.
 type toolRequest struct {
- Generation int64 `json:"generation,omitempty"`
-	RequestID string                 `json:"request_id"`
-	Action    string                 `json:"action"`
-	Params    map[string]interface{} `json:"params,omitempty"`
+	Generation int64                  `json:"generation,omitempty"`
+	RequestID  string                 `json:"request_id"`
+	Action     string                 `json:"action"`
+	Params     map[string]interface{} `json:"params,omitempty"`
 }
 
 type AndroidTool struct {
@@ -321,14 +321,16 @@ func toBool(v interface{}) (bool, bool) {
 }
 
 func (t *AndroidTool) sendAndWait(ctx context.Context, action string, params map[string]interface{}) *ToolResult {
-	if ctx.Err() != nil { return ErrorResult("Действие остановлено") }
- requestID := uuid.New().String()
+	if ctx.Err() != nil {
+		return ErrorResult("Действие остановлено")
+	}
+	requestID := uuid.New().String()
 
 	req := toolRequest{
-		RequestID: requestID,
- Generation: bus.Generation(ctx),
-		Action:    action,
-		Params:    params,
+		RequestID:  requestID,
+		Generation: bus.Generation(ctx),
+		Action:     action,
+		Params:     params,
 	}
 
 	reqJSON, err := json.Marshal(req)
@@ -338,10 +340,12 @@ func (t *AndroidTool) sendAndWait(ctx context.Context, action string, params map
 
 	// Register waiter before sending to avoid race
 	respCh := DeviceResponseWaiter.Register(requestID)
- defer DeviceResponseWaiter.Cleanup(requestID)
- defer func() {
- if ctx.Err() != nil { _ = t.sendCallback(t.channel, t.chatID, string(reqJSON), "tool_cancel") }
- }()
+	defer DeviceResponseWaiter.Cleanup(requestID)
+	defer func() {
+		if ctx.Err() != nil {
+			_ = t.sendCallback(t.channel, t.chatID, string(reqJSON), "tool_cancel")
+		}
+	}()
 
 	if err := t.sendCallback(t.channel, t.chatID, string(reqJSON), "tool_request"); err != nil {
 		DeviceResponseWaiter.Cleanup(requestID)
@@ -358,7 +362,9 @@ func (t *AndroidTool) sendAndWait(ctx context.Context, action string, params map
 				ForLLM:  "accessibility_required: The accessibility service is not enabled. The settings dialog has been shown to the user. Do not retry automatically - wait for the user to enable the service and try again.",
 			}
 		}
-		if strings.HasPrefix(content, "error:") { return ErrorResult(strings.TrimSpace(strings.TrimPrefix(content, "error:"))) }
+		if strings.HasPrefix(content, "error:") {
+			return ErrorResult(strings.TrimSpace(strings.TrimPrefix(content, "error:")))
+		}
 		// Screenshot returns base64 JPEG data — wrap as multimodal result
 		if action == "screenshot" {
 			return &ToolResult{
@@ -369,7 +375,7 @@ func (t *AndroidTool) sendAndWait(ctx context.Context, action string, params map
 		}
 		return SilentResult(content)
 	case <-time.After(androidToolTimeout):
- _ = t.sendCallback(t.channel, t.chatID, string(reqJSON), "tool_cancel")
+		_ = t.sendCallback(t.channel, t.chatID, string(reqJSON), "tool_cancel")
 		DeviceResponseWaiter.Cleanup(requestID)
 		return ErrorResult("android tool request timed out (75s)")
 	case <-ctx.Done():
@@ -406,7 +412,8 @@ func toFloat64(v interface{}) (float64, bool) {
 }
 
 type androidClientTypeKey struct{}
+
 // WithAndroidClientType binds client capabilities to one execution, not shared state.
 func WithAndroidClientType(ctx context.Context, clientType string) context.Context {
- return context.WithValue(ctx, androidClientTypeKey{}, clientType)
+	return context.WithValue(ctx, androidClientTypeKey{}, clientType)
 }

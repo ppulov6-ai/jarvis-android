@@ -9,7 +9,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
- "errors"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -62,37 +62,37 @@ type AgentLoop struct {
 }
 
 type activeProcess struct {
-	cancel context.CancelFunc
-	done   chan struct{}
- generation int64
+	cancel     context.CancelFunc
+	done       chan struct{}
+	generation int64
 }
 
 // processOptions configures how a message is processed
 type processOptions struct {
- ResponsesOutputSink *[]json.RawMessage
-	SessionKey      string            // Session identifier for history/context
-	Channel         string            // Target channel for tool execution
-	ChatID          string            // Target chat ID for tool execution
-	UserMessage     string            // User message content (may include prefix)
-	Media           []string          // Base64 data URLs for images
-	DefaultResponse string            // Response when LLM returns empty
-	EnableSummary   bool              // Whether to trigger summarization
-	SendResponse    bool              // Whether to send response via bus
-	NoHistory       bool              // If true, don't load session history (for heartbeat)
-	InputMode       string            // "voice" or "text"
-	Metadata        map[string]string // Channel metadata (e.g. client_type)
-	ResolvedUser    *User             // Resolved user from user directory (nil if unknown)
-	Locale          string            // Normalized locale code (e.g. "en", "ja")
+	ResponsesOutputSink *[]json.RawMessage
+	SessionKey          string            // Session identifier for history/context
+	Channel             string            // Target channel for tool execution
+	ChatID              string            // Target chat ID for tool execution
+	UserMessage         string            // User message content (may include prefix)
+	Media               []string          // Base64 data URLs for images
+	DefaultResponse     string            // Response when LLM returns empty
+	EnableSummary       bool              // Whether to trigger summarization
+	SendResponse        bool              // Whether to send response via bus
+	NoHistory           bool              // If true, don't load session history (for heartbeat)
+	InputMode           string            // "voice" or "text"
+	Metadata            map[string]string // Channel metadata (e.g. client_type)
+	ResolvedUser        *User             // Resolved user from user directory (nil if unknown)
+	Locale              string            // Normalized locale code (e.g. "en", "ja")
 }
 
 // createToolRegistry creates a tool registry with common tools.
 // This is shared between main agent and subagents.
 func createToolRegistry(workspace string, restrict bool, cfg *config.Config, msgBus *bus.MessageBus, dataDir string) *tools.ToolRegistry {
 	if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
- workspace = filepath.Join(os.Getenv("HOME"), ".clawdroid", "workspace")
- restrict = true
- }
- registry := tools.NewToolRegistry()
+		workspace = filepath.Join(os.Getenv("HOME"), ".clawdroid", "workspace")
+		restrict = true
+	}
+	registry := tools.NewToolRegistry()
 
 	// File system tools
 	registry.Register(tools.NewReadFileTool(workspace, restrict))
@@ -156,7 +156,9 @@ func createToolRegistry(workspace string, restrict bool, cfg *config.Config, msg
 
 func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers.LLMProvider) *AgentLoop {
 	workspace := cfg.WorkspacePath()
- if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" { workspace = filepath.Join(os.Getenv("HOME"), ".clawdroid", "workspace") }
+	if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
+		workspace = filepath.Join(os.Getenv("HOME"), ".clawdroid", "workspace")
+	}
 	dataDir := cfg.DataPath()
 	_ = os.MkdirAll(workspace, 0755)
 	_ = os.MkdirAll(dataDir, 0755)
@@ -277,11 +279,13 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 
 func (al *AgentLoop) Run(ctx context.Context) error {
 	al.running.Store(true)
- al.bus.SetCancelHandler(func(session string, generation int64) {
- al.procsMu.Lock()
- defer al.procsMu.Unlock()
- if active := al.activeProcs[session]; active != nil && active.generation <= generation { active.cancel() }
- })
+	al.bus.SetCancelHandler(func(session string, generation int64) {
+		al.procsMu.Lock()
+		defer al.procsMu.Unlock()
+		if active := al.activeProcs[session]; active != nil && active.generation <= generation {
+			active.cancel()
+		}
+	})
 
 	for al.running.Load() {
 		select {
@@ -298,7 +302,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				sessionKey = fmt.Sprintf("%s:%s", msg.Channel, msg.ChatID)
 			}
 
-			if !al.bus.IsCurrent(msg.Channel+":"+msg.ChatID, msg.Generation) { continue }
+			if !al.bus.IsCurrent(msg.Channel+":"+msg.ChatID, msg.Generation) {
+				continue
+			}
 			al.procsMu.Lock()
 			if active, exists := al.activeProcs[sessionKey]; exists {
 				if al.queueMessages {
@@ -325,10 +331,10 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			}
 
 			if !al.bus.IsCurrent(msg.Channel+":"+msg.ChatID, msg.Generation) {
- al.procsMu.Unlock()
- continue
- }
- procCtx, procCancel := context.WithCancel(bus.WithGeneration(ctx, msg.Generation))
+				al.procsMu.Unlock()
+				continue
+			}
+			procCtx, procCancel := context.WithCancel(bus.WithGeneration(ctx, msg.Generation))
 			done := make(chan struct{})
 			al.activeProcs[sessionKey] = &activeProcess{cancel: procCancel, done: done, generation: msg.Generation}
 			al.procsMu.Unlock()
@@ -379,9 +385,11 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
- al.procsMu.Lock()
- for _, active := range al.activeProcs { active.cancel() }
- al.procsMu.Unlock()
+	al.procsMu.Lock()
+	for _, active := range al.activeProcs {
+		active.cancel()
+	}
+	al.procsMu.Unlock()
 	if al.mcpManager != nil {
 		al.mcpManager.Stop()
 	}
@@ -707,8 +715,8 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 
 	// 5. Run LLM iteration loop
 	var finalResponsesOutput []json.RawMessage
- opts.ResponsesOutputSink = &finalResponsesOutput
- finalContent, iteration, err := al.runLLMIteration(ctx, messages, opts, &currentStatus)
+	opts.ResponsesOutputSink = &finalResponsesOutput
+	finalContent, iteration, err := al.runLLMIteration(ctx, messages, opts, &currentStatus)
 
 	if ctx.Err() != nil {
 		if !al.queueMessages {
@@ -738,7 +746,7 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 	}
 
 	// 6. Save final assistant message to session
-	al.sessions.AddFullMessage(opts.SessionKey, providers.Message{Role:"assistant", Content:finalContent, ResponsesOutput:finalResponsesOutput})
+	al.sessions.AddFullMessage(opts.SessionKey, providers.Message{Role: "assistant", Content: finalContent, ResponsesOutput: finalResponsesOutput})
 	_ = al.sessions.Save(opts.SessionKey)
 
 	// 7. Optional: summarization
@@ -833,11 +841,11 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 			response, err = al.provider.Chat(ctx, messages, providerToolDefs, al.model, llmOpts)
 
 			if err == nil {
- if response.ReplayReset {
- messages = providers.WithoutResponsesReplay(messages)
- al.sessions.SetHistory(opts.SessionKey, providers.WithoutResponsesReplay(al.sessions.GetHistory(opts.SessionKey)))
- _ = al.sessions.Save(opts.SessionKey)
- }
+				if response.ReplayReset {
+					messages = providers.WithoutResponsesReplay(messages)
+					al.sessions.SetHistory(opts.SessionKey, providers.WithoutResponsesReplay(al.sessions.GetHistory(opts.SessionKey)))
+					_ = al.sessions.Save(opts.SessionKey)
+				}
 				break // Success
 			}
 
@@ -852,8 +860,8 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 
 			// Check for context window errors (provider specific, but usually contain "token" or "invalid")
 			var openAIError *providers.OpenAIError
- isTypedContextError := errors.As(err, &openAIError) && openAIError.Code == "context"
- isContextError := isTypedContextError || strings.Contains(errMsg, "token") ||
+			isTypedContextError := errors.As(err, &openAIError) && openAIError.Code == "context"
+			isContextError := isTypedContextError || strings.Contains(errMsg, "token") ||
 				strings.Contains(errMsg, "context") ||
 				strings.Contains(errMsg, "invalidparameter") ||
 				strings.Contains(errMsg, "length")
@@ -914,7 +922,9 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 
 		// Check if no tool calls - we're done
 		if len(response.ToolCalls) == 0 {
- if opts.ResponsesOutputSink != nil { *opts.ResponsesOutputSink = response.ResponsesOutput }
+			if opts.ResponsesOutputSink != nil {
+				*opts.ResponsesOutputSink = response.ResponsesOutput
+			}
 			finalContent = response.Content
 			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
 				map[string]interface{}{
@@ -938,9 +948,9 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 
 		// Build assistant message with tool calls
 		assistantMsg := providers.Message{
-			Role:    "assistant",
-			Content: response.Content,
- ResponsesOutput: response.ResponsesOutput,
+			Role:            "assistant",
+			Content:         response.Content,
+			ResponsesOutput: response.ResponsesOutput,
 		}
 		for _, tc := range response.ToolCalls {
 			argumentsJSON, _ := json.Marshal(tc.Arguments)
@@ -1015,7 +1025,9 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 				}
 			}
 
-			if ctx.Err() != nil { return "", iteration, ctx.Err() }
+			if ctx.Err() != nil {
+				return "", iteration, ctx.Err()
+			}
 			toolResult := al.tools.ExecuteWithContext(tools.WithAndroidClientType(ctx, opts.Metadata["client_type"]), tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
 
 			// Send ForUser content to user immediately if not Silent

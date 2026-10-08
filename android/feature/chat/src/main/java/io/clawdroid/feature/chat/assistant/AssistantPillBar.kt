@@ -66,7 +66,7 @@ import com.composables.icons.lucide.R as LucideR
 import kotlin.math.PI
 import kotlin.math.sin
 
-private val PillBackground = Color(0xE6141428)
+private val PillBackground = Color(0xE6242D28)
 private val ErrorColor = Color(0xFFEF4444)
 
 @Composable
@@ -323,8 +323,8 @@ fun AssistantPillBar(
     }
 }
 
-private val UserBubbleBackground = Color(0xFF2563EB)
-private val AssistantBubbleBackground = Color(0xFF1E1E3A)
+private val UserBubbleBackground = Color(0xFF3E715C)
+private val AssistantBubbleBackground = Color(0xFF28352D)
 
 @Composable
 private fun ChatBubble(turn: ChatTurn) {

@@ -38,4 +38,19 @@ class OpenAiSetupViewModelTest {
         assertEquals("OpenAI отклонил ключ", model.uiState.value.error)
         assertFalse(model.uiState.value.loading)
     }
+    @Test fun `bounded connection timeout clears loading and exposes useful error`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val api = mockk<SetupApiClient>()
+        coEvery { api.connectOpenAi(any()) } coAnswers {
+            kotlinx.coroutines.withTimeout(1L) { kotlinx.coroutines.delay(2L) }
+        }
+        val model = OpenAiSetupViewModel(api)
+        model.onKeyChange("test-key")
+        var connected = false
+        model.connect { connected = true }
+        advanceUntilIdle()
+        assertFalse(connected)
+        assertFalse(model.uiState.value.loading)
+        assertTrue(model.uiState.value.error!!.contains("слишком много времени"))
+    }
 }

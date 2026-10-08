@@ -1,10 +1,10 @@
 package logger
 
 import (
+	"bytes"
+	"log"
+	"strings"
 	"testing"
- "bytes"
- "log"
- "strings"
 )
 
 func TestLogLevelFiltering(t *testing.T) {
@@ -128,15 +128,19 @@ func TestLoggerHelperFunctions(t *testing.T) {
 }
 
 func TestAndroidLogDoesNotPersistPayload(t *testing.T) {
- t.Setenv("CLAWDROID_ANDROID_SECURE_SECRETS","true")
- initial:=currentLevel
- defer SetLevel(initial)
- SetLevel(INFO)
- previous:=log.Writer()
- defer log.SetOutput(previous)
- var output bytes.Buffer
- log.SetOutput(&output)
- InfoCF("agent", "private-secret-message",map[string]interface{}{"api_key":"private-secret-key"})
- if strings.Contains(output.String(),"private-secret") {t.Fatal("secret logged")}
- if !strings.Contains(output.String(),"agent") {t.Fatal("component metadata was lost")}
+	t.Setenv("CLAWDROID_ANDROID_SECURE_SECRETS", "true")
+	initial := currentLevel
+	defer SetLevel(initial)
+	SetLevel(INFO)
+	previous := log.Writer()
+	defer log.SetOutput(previous)
+	var output bytes.Buffer
+	log.SetOutput(&output)
+	InfoCF("agent", "private-secret-message", map[string]interface{}{"api_key": "private-secret-key"})
+	if strings.Contains(output.String(), "private-secret") {
+		t.Fatal("secret logged")
+	}
+	if !strings.Contains(output.String(), "agent") {
+		t.Fatal("component metadata was lost")
+	}
 }

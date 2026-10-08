@@ -66,10 +66,10 @@ fun CosmosOrb(
     val breath by motion.animateFloat(0.9f, 1.04f, infiniteRepeatable(tween(1500, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "breath")
     val color = when (state.phase) {
         VoicePhase.ERROR -> Color(0xFFFF717C)
-        VoicePhase.THINKING, VoicePhase.SENDING -> Color(0xFFC18BFF)
-        VoicePhase.SPEAKING -> Color(0xFF75FFC9)
-        VoicePhase.PAUSED, VoicePhase.IDLE -> Color(0xFF8298BA)
-        else -> Color(0xFF63D9FF)
+        VoicePhase.THINKING, VoicePhase.SENDING -> Color(0xFFE48A5E)
+        VoicePhase.SPEAKING -> Color(0xFF91B79A)
+        VoicePhase.PAUSED, VoicePhase.IDLE -> Color(0xFFB4BCAB)
+        else -> Color(0xFF91B79A)
     }
     val scroll = rememberScrollState()
     Column(modifier.fillMaxWidth().then(if (expanded) Modifier.verticalScroll(scroll) else Modifier), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -87,7 +87,7 @@ fun CosmosOrb(
             val pulse = if (energetic) breath + state.amplitudeNormalized.coerceIn(0f, 1f) * 0.08f else breath
             val radius = size.minDimension * 0.32f * pulse
             drawCircle(Brush.radialGradient(listOf(color.copy(alpha = .35f), Color.Transparent), center, size.minDimension / 2), size.minDimension / 2, center)
-            drawCircle(Brush.radialGradient(listOf(Color(0xFFB9E7FF), color.copy(alpha = .8f), Color(0xFF292052), Color(0xFF0B112C)), center - Offset(radius * .32f, radius * .4f), radius * 1.65f), radius, center)
+            drawCircle(Brush.radialGradient(listOf(Color(0xFFFFFBF0), color.copy(alpha = .8f), Color(0xFF174D2D), Color(0xFF0D2419)), center - Offset(radius * .32f, radius * .4f), radius * 1.65f), radius, center)
             for (i in 0 until 22) {
                 val t = i * 2.39996f + angle * .004f
                 val r = radius * (0.2f + (i % 7) / 10f)
@@ -102,12 +102,12 @@ fun CosmosOrb(
             drawCircle(color.copy(alpha = .3f), radius, center, style = Stroke(1f))
             drawCircle(Color.White.copy(alpha = .6f), radius * .09f, center - Offset(radius * .38f, radius * .42f))
         }
-        Surface(color = Color(0xE614192D), shape = RoundedCornerShape(16.dp)) {
+        Surface(color = Color(0xF0123621), shape = RoundedCornerShape(16.dp)) {
             Text(orbStatus(state.phase), color = color, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
         }
         if (expanded) {
             Spacer(Modifier.height(8.dp))
-            Surface(color = Color(0xF514192D), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
+            Surface(color = Color(0xF5123621), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("Джарвисджон", style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.weight(1f))
@@ -121,7 +121,7 @@ fun CosmosOrb(
                         }
                     }
                     val text = state.errorMessage ?: state.statusText ?: state.responseText.ifEmpty { state.recognizedText.ifEmpty { "Говорите команду. Шарик можно перемещать пальцем." } }
-                    Text(text, color = Color(0xFFC9D6EB), maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    Text(text, color = Color(0xFFFFFBF0), maxLines = 4, overflow = TextOverflow.Ellipsis)
                     Row {
                         TextButton(onClick = onPause) { Text(if (state.phase == VoicePhase.PAUSED) "Слушать" else "Пауза") }
                         TextButton(onClick = onInterrupt) { Text("Новая команда") }

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
- "strconv"
- "strings"
 
 	"github.com/KarakuriAgent/clawdroid/pkg/broadcast"
 	"github.com/KarakuriAgent/clawdroid/pkg/bus"
@@ -23,53 +23,55 @@ import (
 
 // wsIncoming is the JSON message sent from APK to clawdroid.
 type wsIncoming struct {
- Generation int64 `json:"generation,omitempty"`
-	Content   string   `json:"content"`
-	SenderID  string   `json:"sender_id,omitempty"`
-	Images    []string `json:"images,omitempty"`
-	InputMode string   `json:"input_mode,omitempty"`
-	Type      string   `json:"type,omitempty"`       // "tool_response" for device tool responses
-	RequestID string   `json:"request_id,omitempty"` // correlates with tool_request
+	Generation int64    `json:"generation,omitempty"`
+	Content    string   `json:"content"`
+	SenderID   string   `json:"sender_id,omitempty"`
+	Images     []string `json:"images,omitempty"`
+	InputMode  string   `json:"input_mode,omitempty"`
+	Type       string   `json:"type,omitempty"`       // "tool_response" for device tool responses
+	RequestID  string   `json:"request_id,omitempty"` // correlates with tool_request
 }
 
 // wsOutgoing is the JSON message sent from clawdroid to APK.
 type wsOutgoing struct {
- Generation int64 `json:"generation,omitempty"`
-	Content string `json:"content"`
-	Type    string `json:"type,omitempty"`
+	Generation int64  `json:"generation,omitempty"`
+	Content    string `json:"content"`
+	Type       string `json:"type,omitempty"`
 }
 
 // WebSocketChannel is a server-side WebSocket channel that accepts
 // connections from clients (e.g. a Google Assistant replacement APK).
 type WebSocketChannel struct {
 	*BaseChannel
-	config      config.WebSocketConfig
-	configPath  string
- secureEmbedded bool
-	server      *http.Server
-	upgrader    websocket.Upgrader
-	clients     map[*websocket.Conn]string // conn → clientID
-	chatConns   map[string]*websocket.Conn // chatID → conn
-	clientTypes map[string]string          // chatID → clientType (retained after disconnect)
-	mu          sync.RWMutex
- writeMu sync.Mutex
-	ctx         context.Context
-	cancel      context.CancelFunc
+	config         config.WebSocketConfig
+	configPath     string
+	secureEmbedded bool
+	server         *http.Server
+	upgrader       websocket.Upgrader
+	clients        map[*websocket.Conn]string // conn → clientID
+	chatConns      map[string]*websocket.Conn // chatID → conn
+	clientTypes    map[string]string          // chatID → clientType (retained after disconnect)
+	mu             sync.RWMutex
+	writeMu        sync.Mutex
+	ctx            context.Context
+	cancel         context.CancelFunc
 }
 
 func NewWebSocketChannel(cfg config.WebSocketConfig, msgBus *bus.MessageBus, configPath string) (*WebSocketChannel, error) {
 	secure := os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true"
- if secure {
-  cfg.APIKey = os.Getenv("CLAWDROID_GATEWAY_API_KEY")
-  if cfg.APIKey == "" { return nil, fmt.Errorf("Для защищённого WebSocket требуется ключ шлюза") }
- }
- base := NewBaseChannel("websocket", cfg, msgBus, cfg.AllowFrom)
+	if secure {
+		cfg.APIKey = os.Getenv("CLAWDROID_GATEWAY_API_KEY")
+		if cfg.APIKey == "" {
+			return nil, fmt.Errorf("Для защищённого WebSocket требуется ключ шлюза")
+		}
+	}
+	base := NewBaseChannel("websocket", cfg, msgBus, cfg.AllowFrom)
 
 	return &WebSocketChannel{
-		BaseChannel: base,
-		config:      cfg,
-		configPath:  configPath,
- secureEmbedded: secure,
+		BaseChannel:    base,
+		config:         cfg,
+		configPath:     configPath,
+		secureEmbedded: secure,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -156,17 +158,21 @@ func (c *WebSocketChannel) Send(ctx context.Context, msg bus.OutboundMessage) er
 	c.mu.RUnlock()
 
 	if (msg.Type == "tool_request" || msg.Type == "tool_cancel") && msg.Generation == 0 {
- var request struct { Generation int64 `json:"generation"` }
- _ = json.Unmarshal([]byte(msg.Content), &request)
- msg.Generation = request.Generation
- }
- if !c.bus.IsCurrent("websocket:"+msg.ChatID, msg.Generation) { return nil }
+		var request struct {
+			Generation int64 `json:"generation"`
+		}
+		_ = json.Unmarshal([]byte(msg.Content), &request)
+		msg.Generation = request.Generation
+	}
+	if !c.bus.IsCurrent("websocket:"+msg.ChatID, msg.Generation) {
+		return nil
+	}
 	if !ok {
 		// Connection not found — try broadcast fallback for "main" clients.
 		return c.maybeBroadcast(msg, clientType, fmt.Errorf("no connection for chat %s", msg.ChatID))
 	}
 
- out := wsOutgoing{Content: msg.Content, Type: msg.Type, Generation: msg.Generation}
+	out := wsOutgoing{Content: msg.Content, Type: msg.Type, Generation: msg.Generation}
 	data, err := json.Marshal(out)
 	if err != nil {
 		return fmt.Errorf("failed to marshal response: %w", err)
@@ -221,10 +227,10 @@ func (c *WebSocketChannel) maybeBroadcast(msg bus.OutboundMessage, clientType st
 }
 
 func (c *WebSocketChannel) handleWS(w http.ResponseWriter, r *http.Request) {
- if !c.authorizedRequest(r) {
-  http.Error(w, "unauthorized", http.StatusUnauthorized)
-  return
- }
+	if !c.authorizedRequest(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	conn, err := c.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -299,7 +305,7 @@ func (c *WebSocketChannel) GetClientType(chatID string) string {
 
 func (c *WebSocketChannel) readPump(conn *websocket.Conn, clientID, chatID, clientType, locale string) {
 	defer func() {
- c.bus.InvalidateSession("websocket:"+chatID)
+		c.bus.InvalidateSession("websocket:" + chatID)
 		c.mu.Lock()
 		delete(c.clients, conn)
 		delete(c.chatConns, chatID)
@@ -339,21 +345,27 @@ func (c *WebSocketChannel) readPump(conn *websocket.Conn, clientID, chatID, clie
 		}
 
 		session := "websocket:" + chatID
-        if incoming.Type == "cancel" {
-            if !c.IsAllowed(clientID) { continue }
-            if c.bus.SetGeneration(session, incoming.Generation) {
-                c.bus.CancelSession(session, incoming.Generation)
-                c.bus.PublishOutbound(bus.OutboundMessage{Channel: "websocket", ChatID: chatID, Type: "cancelled", Generation: incoming.Generation})
-            }
-            continue
-        }
-        if incoming.Type == "tool_response" && !c.bus.IsCurrent(session, incoming.Generation) { continue }
-        if incoming.Type != "tool_response" && incoming.Generation > 0 {
- if !c.IsAllowed(clientID) || !c.bus.SetGeneration(session, incoming.Generation) { continue }
- c.bus.CancelSession(session, incoming.Generation-1)
- }
+		if incoming.Type == "cancel" {
+			if !c.IsAllowed(clientID) {
+				continue
+			}
+			if c.bus.SetGeneration(session, incoming.Generation) {
+				c.bus.CancelSession(session, incoming.Generation)
+				c.bus.PublishOutbound(bus.OutboundMessage{Channel: "websocket", ChatID: chatID, Type: "cancelled", Generation: incoming.Generation})
+			}
+			continue
+		}
+		if incoming.Type == "tool_response" && !c.bus.IsCurrent(session, incoming.Generation) {
+			continue
+		}
+		if incoming.Type != "tool_response" && incoming.Generation > 0 {
+			if !c.IsAllowed(clientID) || !c.bus.SetGeneration(session, incoming.Generation) {
+				continue
+			}
+			c.bus.CancelSession(session, incoming.Generation-1)
+		}
 
-        // Intercept tool_response messages: deliver to ResponseWaiter, skip inbound bus.
+		// Intercept tool_response messages: deliver to ResponseWaiter, skip inbound bus.
 		if incoming.Type == "tool_response" && incoming.RequestID != "" {
 			tools.DeviceResponseWaiter.Deliver(incoming.RequestID, incoming.Content)
 			continue
@@ -389,7 +401,7 @@ func (c *WebSocketChannel) readPump(conn *websocket.Conn, clientID, chatID, clie
 			"client_type": clientType,
 			"sender_name": "",
 			"locale":      locale,
- "generation": strconv.FormatInt(incoming.Generation, 10),
+			"generation":  strconv.FormatInt(incoming.Generation, 10),
 		}
 		c.HandleMessage(senderID, chatID, content, media, metadata)
 	}
@@ -397,19 +409,25 @@ func (c *WebSocketChannel) readPump(conn *websocket.Conn, clientID, chatID, clie
 
 // gorilla/websocket requires one writer per connection.
 func (c *WebSocketChannel) writeMessage(conn *websocket.Conn, data []byte) error {
- c.writeMu.Lock()
- defer c.writeMu.Unlock()
- return conn.WriteMessage(websocket.TextMessage, data)
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
 // Embedded Android connections must authenticate without leaking credentials
 // into URLs. Query authentication is retained only for standalone clients.
 func (c *WebSocketChannel) authorizedRequest(r *http.Request) bool {
- key := c.config.APIKey
- if key == "" { return !c.secureEmbedded }
- header := r.Header.Get("Authorization")
- supplied := ""
- if strings.HasPrefix(header, "Bearer ") { supplied = strings.TrimPrefix(header, "Bearer ") }
- if !c.secureEmbedded && header == "" { supplied = r.URL.Query().Get("api_key") }
- return subtle.ConstantTimeCompare([]byte(supplied), []byte(key)) == 1
+	key := c.config.APIKey
+	if key == "" {
+		return !c.secureEmbedded
+	}
+	header := r.Header.Get("Authorization")
+	supplied := ""
+	if strings.HasPrefix(header, "Bearer ") {
+		supplied = strings.TrimPrefix(header, "Bearer ")
+	}
+	if !c.secureEmbedded && header == "" {
+		supplied = r.URL.Query().Get("api_key")
+	}
+	return subtle.ConstantTimeCompare([]byte(supplied), []byte(key)) == 1
 }

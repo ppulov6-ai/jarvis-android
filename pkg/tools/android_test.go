@@ -1,9 +1,9 @@
 package tools
 
 import (
- "sync"
- "context"
- "encoding/json"
+	"context"
+	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/KarakuriAgent/clawdroid/pkg/config"
@@ -480,53 +480,67 @@ func searchString(s, sub string) bool {
 }
 
 func TestFailedScreenshotIsNotImage(t *testing.T) {
- tool := NewAndroidTool(allEnabledConfig())
- tool.SetContext("websocket", "test-session")
- tool.SetSendCallback(func(channel, chatID, content, msgType string) error {
-  var request toolRequest
-  if err := json.Unmarshal([]byte(content), &request); err != nil { return err }
-  DeviceResponseWaiter.Deliver(request.RequestID, "error: permission denied")
-  return nil
- })
- result := tool.sendAndWait(context.Background(), "screenshot", nil)
- if !result.IsError || len(result.Media) != 0 { t.Fatal("failed screenshot became image data") }
+	tool := NewAndroidTool(allEnabledConfig())
+	tool.SetContext("websocket", "test-session")
+	tool.SetSendCallback(func(channel, chatID, content, msgType string) error {
+		var request toolRequest
+		if err := json.Unmarshal([]byte(content), &request); err != nil {
+			return err
+		}
+		DeviceResponseWaiter.Deliver(request.RequestID, "error: permission denied")
+		return nil
+	})
+	result := tool.sendAndWait(context.Background(), "screenshot", nil)
+	if !result.IsError || len(result.Media) != 0 {
+		t.Fatal("failed screenshot became image data")
+	}
 }
 
 func TestCancelledAndroidRequestDoesNotSend(t *testing.T) {
- tool := NewAndroidTool(allEnabledConfig())
- sent := false
- tool.SetSendCallback(func(channel, chatID, content, msgType string) error { sent = true; return nil })
- ctx, cancel := context.WithCancel(context.Background())
- cancel()
- result := tool.sendAndWait(ctx, "tap", nil)
- if sent || !result.IsError { t.Fatal("cancelled request reached Android") }
+	tool := NewAndroidTool(allEnabledConfig())
+	sent := false
+	tool.SetSendCallback(func(channel, chatID, content, msgType string) error { sent = true; return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := tool.sendAndWait(ctx, "tap", nil)
+	if sent || !result.IsError {
+		t.Fatal("cancelled request reached Android")
+	}
 }
 
 func TestAndroidRegistryKeepsSessionContextIsolated(t *testing.T) {
- registry := NewToolRegistry()
- tool := NewAndroidTool(allEnabledConfig())
- var mu sync.Mutex
- routed := map[string]bool{}
- tool.SetSendCallback(func(channel, chatID, content, msgType string) error {
-  var request toolRequest
-  if err := json.Unmarshal([]byte(content), &request); err != nil { return err }
-  mu.Lock()
-  routed[channel+":"+chatID] = true
-  mu.Unlock()
-  DeviceResponseWaiter.Deliver(request.RequestID, "ok")
-  return nil
- })
- registry.Register(tool)
- var wg sync.WaitGroup
- for _, session := range []string{"one", "two"} {
-  wg.Add(1)
-  go func(chatID string) {
-   defer wg.Done()
-   result := registry.ExecuteWithContext(WithAndroidClientType(context.Background(), "assistant"), "android", map[string]interface{}{"action": "search_apps", "query": "clock"}, "websocket", chatID, nil)
-   if result.IsError { t.Errorf("session %s: %s", chatID, result.ForLLM) }
-  }(session)
- }
- wg.Wait()
- if !routed["websocket:one"] || !routed["websocket:two"] { t.Fatal("device request was routed to another session") }
- if tool.channel != "" || tool.chatID != "" { t.Fatal("registry mutated shared Android context") }
+	registry := NewToolRegistry()
+	tool := NewAndroidTool(allEnabledConfig())
+	var mu sync.Mutex
+	routed := map[string]bool{}
+	tool.SetSendCallback(func(channel, chatID, content, msgType string) error {
+		var request toolRequest
+		if err := json.Unmarshal([]byte(content), &request); err != nil {
+			return err
+		}
+		mu.Lock()
+		routed[channel+":"+chatID] = true
+		mu.Unlock()
+		DeviceResponseWaiter.Deliver(request.RequestID, "ok")
+		return nil
+	})
+	registry.Register(tool)
+	var wg sync.WaitGroup
+	for _, session := range []string{"one", "two"} {
+		wg.Add(1)
+		go func(chatID string) {
+			defer wg.Done()
+			result := registry.ExecuteWithContext(WithAndroidClientType(context.Background(), "assistant"), "android", map[string]interface{}{"action": "search_apps", "query": "clock"}, "websocket", chatID, nil)
+			if result.IsError {
+				t.Errorf("session %s: %s", chatID, result.ForLLM)
+			}
+		}(session)
+	}
+	wg.Wait()
+	if !routed["websocket:one"] || !routed["websocket:two"] {
+		t.Fatal("device request was routed to another session")
+	}
+	if tool.channel != "" || tool.chatID != "" {
+		t.Fatal("registry mutated shared Android context")
+	}
 }

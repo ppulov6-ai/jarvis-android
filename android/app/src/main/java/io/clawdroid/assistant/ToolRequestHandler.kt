@@ -60,6 +60,24 @@ class ToolRequestHandler(
     private val permissionRequester = PermissionRequester(context)
 
     suspend fun handle(request: ToolRequest): ToolResponse {
+        val category = when (request.action) {
+            "screenshot" -> "screenshot"
+            "tap", "swipe", "text", "keyevent", "get_ui_tree" -> "ui"
+            else -> "other"
+        }
+        val started = android.os.SystemClock.elapsedRealtime()
+        io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "${category}_started")
+        return try {
+            val result = handleInternal(request)
+            io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "${category}_${if (result.success) "success" else "error"}", durationMs = (android.os.SystemClock.elapsedRealtime() - started).coerceIn(0, 86400000))
+            result
+        } catch (error: CancellationException) {
+            io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "${category}_cancelled", durationMs = (android.os.SystemClock.elapsedRealtime() - started).coerceIn(0, 86400000))
+            throw error
+        }
+    }
+
+    private suspend fun handleInternal(request: ToolRequest): ToolResponse {
         return try {
             currentCoroutineContext().ensureActive()
             val guarded = request.action in setOf("tap", "swipe", "text", "keyevent")

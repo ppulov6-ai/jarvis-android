@@ -501,6 +501,7 @@ func TestRunLoop_TimerBasedExecution(t *testing.T) {
 
 	select {
 	case id := <-executed:
+		waitForJobPersistence(t, cs, id)
 		if id != job.ID {
 			t.Errorf("got job %s, want %s", id, job.ID)
 		}
@@ -531,10 +532,36 @@ func TestRunLoop_RescheduleOnAddJob(t *testing.T) {
 
 	select {
 	case id := <-executed:
+		waitForJobPersistence(t, cs, id)
 		if id != job.ID {
 			t.Errorf("got job %s, want %s", id, job.ID)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("dynamically added job was not executed")
+	}
+}
+
+// The callback fires before executeJobByID persists its final state. Wait for
+// that write under the same lock before TempDir cleanup can remove the store.
+func waitForJobPersistence(t *testing.T, cs *CronService, id string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		cs.mu.RLock()
+		complete := true
+		for _, job := range cs.store.Jobs {
+			if job.ID == id {
+				complete = job.State.LastStatus == "ok"
+				break
+			}
+		}
+		cs.mu.RUnlock()
+		if complete {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("job final state was not persisted")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

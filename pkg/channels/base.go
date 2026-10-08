@@ -3,8 +3,8 @@ package channels
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
- "strconv"
 
 	"github.com/KarakuriAgent/clawdroid/pkg/bus"
 )
@@ -92,8 +92,8 @@ func (c *BaseChannel) HandleMessage(senderID, chatID, content string, media []st
 	sessionKey := fmt.Sprintf("%s:%s", c.name, chatID)
 
 	generation, _ := strconv.ParseInt(metadata["generation"], 10, 64)
- msg := bus.InboundMessage{
- Generation: generation,
+	msg := bus.InboundMessage{
+		Generation: generation,
 		Channel:    c.name,
 		SenderID:   senderID,
 		ChatID:     chatID,

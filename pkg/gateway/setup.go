@@ -50,11 +50,11 @@ func (s *Server) handleSetupInit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
-        s.cfg.Lock()
-        s.cfg.CopyFrom(cfg)
-        s.cfg.Unlock()
-    }
-    logger.InfoC("gateway", "Initial config created via setup wizard")
+		s.cfg.Lock()
+		s.cfg.CopyFrom(cfg)
+		s.cfg.Unlock()
+	}
+	logger.InfoC("gateway", "Initial config created via setup wizard")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -64,14 +64,16 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	// Read current config from disk (includes init step's gateway settings)
 	// rather than s.cfg which may still be DefaultConfig in setup mode.
 	var currentData []byte
-    var err error
-    if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
-        var loaded *config.Config
-        loaded, err = config.LoadConfig(s.configPath)
-        if err == nil { currentData, err = json.Marshal(loaded) }
-    } else {
-        currentData, err = os.ReadFile(s.configPath)
-    }
+	var err error
+	if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
+		var loaded *config.Config
+		loaded, err = config.LoadConfig(s.configPath)
+		if err == nil {
+			currentData, err = json.Marshal(loaded)
+		}
+	} else {
+		currentData, err = os.ReadFile(s.configPath)
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "failed to read config file")
 		return

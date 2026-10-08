@@ -421,32 +421,57 @@ func TestSaveConfig_LoadConfig_RoundTrip(t *testing.T) {
 }
 
 func TestAndroidSecurePersistence(t *testing.T) {
- t.Setenv("CLAWDROID_ANDROID_SECURE_SECRETS", "true")
- for _, name := range []string{"CLAWDROID_LLM_API_KEY", "CLAWDROID_GATEWAY_API_KEY", "CLAWDROID_CHANNELS_TELEGRAM_TOKEN", "CLAWDROID_CHANNELS_DISCORD_TOKEN", "CLAWDROID_CHANNELS_SLACK_BOT_TOKEN", "CLAWDROID_CHANNELS_SLACK_APP_TOKEN", "CLAWDROID_CHANNELS_LINE_CHANNEL_SECRET", "CLAWDROID_CHANNELS_LINE_CHANNEL_ACCESS_TOKEN", "CLAWDROID_CHANNELS_WEBSOCKET_API_KEY", "CLAWDROID_TOOLS_WEB_BRAVE_API_KEY"} { t.Setenv(name, "") }
- cfg := DefaultConfig()
- cfg.LLM.APIKey = "sensitive-llm-key"
- cfg.Gateway.APIKey = "sensitive-gateway-key"
- cfg.Channels.Telegram.Token = "sensitive-telegram-key"
- path := filepath.Join(t.TempDir(), "config.json")
- if err := SaveConfig(path, cfg); err != nil { t.Fatal(err) }
- data,err:=os.ReadFile(path); if err!=nil {t.Fatal(err)}
- if strings.Contains(string(data), "sensitive-") { t.Fatal("secret persisted on disk") }
- if cfg.LLM.APIKey != "sensitive-llm-key" {t.Fatal("live credential was erased")}
- loaded,err:=LoadConfig(path); if err!=nil {t.Fatal(err)}
- if loaded.LLM.APIKey != cfg.LLM.APIKey {t.Fatal("credential lost on in-process restart")}
+	t.Setenv("CLAWDROID_ANDROID_SECURE_SECRETS", "true")
+	for _, name := range []string{"CLAWDROID_LLM_API_KEY", "CLAWDROID_GATEWAY_API_KEY", "CLAWDROID_CHANNELS_TELEGRAM_TOKEN", "CLAWDROID_CHANNELS_DISCORD_TOKEN", "CLAWDROID_CHANNELS_SLACK_BOT_TOKEN", "CLAWDROID_CHANNELS_SLACK_APP_TOKEN", "CLAWDROID_CHANNELS_LINE_CHANNEL_SECRET", "CLAWDROID_CHANNELS_LINE_CHANNEL_ACCESS_TOKEN", "CLAWDROID_CHANNELS_WEBSOCKET_API_KEY", "CLAWDROID_TOOLS_WEB_BRAVE_API_KEY"} {
+		t.Setenv(name, "")
+	}
+	cfg := DefaultConfig()
+	cfg.LLM.APIKey = "sensitive-llm-key"
+	cfg.Gateway.APIKey = "sensitive-gateway-key"
+	cfg.Channels.Telegram.Token = "sensitive-telegram-key"
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "sensitive-") {
+		t.Fatal("secret persisted on disk")
+	}
+	if cfg.LLM.APIKey != "sensitive-llm-key" {
+		t.Fatal("live credential was erased")
+	}
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.LLM.APIKey != cfg.LLM.APIKey {
+		t.Fatal("credential lost on in-process restart")
+	}
 }
 
 func TestMissingConfigStillLoadsEnvironment(t *testing.T) {
- t.Setenv("CLAWDROID_GATEWAY_API_KEY", "setup-auth-key")
- cfg,err:=LoadConfig(filepath.Join(t.TempDir(),"missing.json"));if err!=nil {t.Fatal(err)}
- if cfg.Gateway.APIKey!="setup-auth-key" {t.Fatal("setup mode ignored gateway authentication")}
+	t.Setenv("CLAWDROID_GATEWAY_API_KEY", "setup-auth-key")
+	cfg, err := LoadConfig(filepath.Join(t.TempDir(), "missing.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Gateway.APIKey != "setup-auth-key" {
+		t.Fatal("setup mode ignored gateway authentication")
+	}
 }
 
 func TestAndroidRejectsUnprotectedMCPCredentials(t *testing.T) {
- t.Setenv("CLAWDROID_ANDROID_SECURE_SECRETS", "true")
- cfg:=DefaultConfig()
- cfg.Tools.MCP=map[string]MCPServerConfig{"remote":{Headers:map[string]string{"Authorization":"Bearer private"}}}
- path:=filepath.Join(t.TempDir(),"config.json")
- if err:=SaveConfig(path,cfg);err==nil {t.Fatal("unprotected MCP headers accepted")}
- if _,err:=os.Stat(path);!os.IsNotExist(err) {t.Fatal("unsafe config was written")}
+	t.Setenv("CLAWDROID_ANDROID_SECURE_SECRETS", "true")
+	cfg := DefaultConfig()
+	cfg.Tools.MCP = map[string]MCPServerConfig{"remote": {Headers: map[string]string{"Authorization": "Bearer private"}}}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveConfig(path, cfg); err == nil {
+		t.Fatal("unprotected MCP headers accepted")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("unsafe config was written")
+	}
 }

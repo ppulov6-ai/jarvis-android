@@ -25,10 +25,11 @@ import org.koin.compose.viewmodel.koinViewModel
 @Composable
 fun SetupWizardScreen(
     onSetupComplete: () -> Unit,
+    onExportDiagnostics: (() -> Unit)? = null,
     viewModel: SetupViewModel = koinViewModel(),
 ) {
     if (BuildConfig.FLAVOR == "embedded") {
-        OpenAiSetupScreen(onConnected = onSetupComplete)
+        OpenAiSetupScreen(onConnected = onSetupComplete, onExport = onExportDiagnostics)
         return
     }
     val uiState by viewModel.uiState.collectAsState()

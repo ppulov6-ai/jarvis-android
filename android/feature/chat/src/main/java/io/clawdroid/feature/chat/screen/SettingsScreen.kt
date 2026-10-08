@@ -70,6 +70,8 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToBackendSettings: () -> Unit,
     onNavigateToAppSettings: () -> Unit,
+    onExportDiagnostics: (() -> Unit)? = null,
+    onNavigateToPermissions: (() -> Unit)? = null,
     onNavigateToOpenAi: (() -> Unit)? = null,
     showAdvancedSettings: Boolean = true,
     onLaunchAssistant: (() -> Unit)? = null,
@@ -183,6 +185,12 @@ fun SettingsScreen(
                     color = NeonCyan
                 )
 
+                onNavigateToPermissions?.let { permissions ->
+                    NavigationCard(title = "Разрешения", subtitle = "Специальные возможности, микрофон и плавающее окно", onClick = permissions)
+                }
+                onExportDiagnostics?.let { export ->
+                    NavigationCard(title = "Выгрузить тестовый файл", subtitle = "ZIP с техническими событиями и состоянием разрешений", onClick = export)
+                }
                 onLaunchAssistant?.let { launch ->
                     NavigationCard(title = "Запустить шарик", subtitle = "Голосовой Джарвис поверх других приложений", onClick = launch)
                 }

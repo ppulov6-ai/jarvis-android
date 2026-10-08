@@ -4,20 +4,20 @@ import (
 	"context"
 	"fmt"
 	"net/http"
- "os"
+	"os"
 
 	"github.com/KarakuriAgent/clawdroid/pkg/config"
 	"github.com/KarakuriAgent/clawdroid/pkg/logger"
- "github.com/KarakuriAgent/clawdroid/pkg/providers"
+	"github.com/KarakuriAgent/clawdroid/pkg/providers"
 )
 
 // Server is the Gateway HTTP server that exposes the Config API.
 type Server struct {
-	cfg        *config.Config
-	configPath string
-	server     *http.Server
-	onRestart  func()
- openAIProviderFactory func(string) providers.LLMProvider
+	cfg                   *config.Config
+	configPath            string
+	server                *http.Server
+	onRestart             func()
+	openAIProviderFactory func(string) providers.LLMProvider
 }
 
 // NewServer creates a new Gateway HTTP server.
@@ -37,10 +37,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/config", s.authMiddleware(s.handleGetConfig))
 	mux.HandleFunc("PUT /api/config", s.authMiddleware(s.handlePutConfig))
 	if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
-        mux.HandleFunc("POST /api/setup/init", s.authMiddleware(s.handleSetupInit))
-    } else {
-        mux.HandleFunc("POST /api/setup/init", s.handleSetupInit)
-    }
+		mux.HandleFunc("POST /api/setup/init", s.authMiddleware(s.handleSetupInit))
+	} else {
+		mux.HandleFunc("POST /api/setup/init", s.handleSetupInit)
+	}
 	mux.HandleFunc("PUT /api/setup/complete", s.authMiddleware(s.handleSetupComplete))
 
 	addr := fmt.Sprintf("127.0.0.1:%d", s.cfg.Gateway.Port)

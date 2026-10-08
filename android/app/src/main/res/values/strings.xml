@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
     <string name="app_name">Джарвис</string>
-    <string name="accessibility_service_description">Позволяет Джарвису делать снимки экрана во время разговора с голосовым помощником.</string>
+    <string name="accessibility_service_description">Позволяет Джарвису читать содержимое экрана, делать снимки и управлять приложениями по вашим командам: нажимать, вводить текст и выполнять жесты. Содержимое экрана может передаваться подключённой модели для выполнения задачи.</string>
     <string name="setup_step_1_of_4">Шаг 1 из 4</string>
     <string name="setup_gateway_title">Подключение к локальному серверу</string>
     <string name="setup_gateway_description">Локальный сервер обеспечивает связь приложения с агентом, работающим на этом устройстве. Для проверки запросов нужен ключ API.</string>
@@ -51,8 +51,8 @@
     <string name="notification_channel_gateway_desc">Служба локального сервера</string>
     <string name="notification_title">Джарвис</string>
     <string name="action_cancel">Отмена</string>
-    <string name="assistant_accessibility_title">Настройка захвата экрана</string>
-    <string name="assistant_accessibility_body">Чтобы использовать захват экрана, включите Джарвис в настройках специальных возможностей.\n\nЕсли включить его не удаётся, откройте сведения о приложении, выберите «Разрешить ограниченные настройки» и попробуйте снова.</string>
+    <string name="assistant_accessibility_title">Доступ к экрану и управлению</string>
+    <string name="assistant_accessibility_body">Для снимков и управления экраном включите службу Джарвиса в специальных возможностях.\n\nЕсли доступ запрещён: сведения о Джарвисе → меню ⋮ → «Разрешить ограниченные настройки». Затем вернитесь в специальные возможности и включите Джарвис. Приложение не может снять ограничение самостоятельно.</string>
     <string name="assistant_accessibility_open_settings">Открыть настройки</string>
     <string name="assistant_notification_listening">Слушаю…</string>
     <string name="calendar_picker_title">Выбрать календарь</string>

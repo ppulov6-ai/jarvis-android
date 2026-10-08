@@ -26,6 +26,7 @@ import java.net.URLEncoder
 class ClawDroidApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        io.clawdroid.diagnostics.DiagnosticEvents.initialize(this)
         val koinApp = startKoin {
             androidContext(this@ClawDroidApp)
             modules(appModule, flavorModule, configModule)
@@ -38,6 +39,16 @@ class ClawDroidApp : Application() {
         val wsClient: WebSocketClient = koin.get()
         val configApiClient: ConfigApiClient = koin.get()
         val scope: CoroutineScope = koin.get()
+        scope.launch {
+            wsClient.connectionState.collect { state ->
+                val code = when (state) {
+                    io.clawdroid.core.domain.model.ConnectionState.CONNECTED -> "connected"
+                    io.clawdroid.core.domain.model.ConnectionState.DISCONNECTED -> "disconnected"
+                    else -> "connection_started"
+                }
+                io.clawdroid.diagnostics.DiagnosticEvents.record("websocket", code)
+            }
+        }
         scope.launch { backendLifecycle.start() }
         scope.launch {
             // Wait for backend to be running before connecting WebSocket

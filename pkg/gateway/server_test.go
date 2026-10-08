@@ -2465,36 +2465,55 @@ func TestBuildSchema_FieldGroups(t *testing.T) {
 }
 
 func TestAndroidSetupRequiresAuthAndPreservesSecrets(t *testing.T) {
- t.Setenv("CLAWDROID_ANDROID_SECURE_SECRETS", "true")
- for _, name := range []string{"CLAWDROID_LLM_API_KEY", "CLAWDROID_GATEWAY_API_KEY", "CLAWDROID_CHANNELS_TELEGRAM_TOKEN", "CLAWDROID_CHANNELS_DISCORD_TOKEN", "CLAWDROID_CHANNELS_SLACK_BOT_TOKEN", "CLAWDROID_CHANNELS_SLACK_APP_TOKEN", "CLAWDROID_CHANNELS_LINE_CHANNEL_SECRET", "CLAWDROID_CHANNELS_LINE_CHANNEL_ACCESS_TOKEN", "CLAWDROID_CHANNELS_WEBSOCKET_API_KEY", "CLAWDROID_TOOLS_WEB_BRAVE_API_KEY"} { t.Setenv(name, "") }
- cfg := config.DefaultConfig()
- cfg.Gateway.APIKey = "initial-auth"
- cfg.Gateway.Port = 0
- s := NewServer(cfg, filepath.Join(t.TempDir(), "config.json"), nil)
- if err:=s.Start();err!=nil {t.Fatal(err)}
- defer s.Stop(context.Background())
- req:=httptest.NewRequest(http.MethodPost,"/api/setup/init",strings.NewReader(`{"gateway":{"api_key":"replacement-auth"}}`))
- denied:=httptest.NewRecorder()
- s.server.Handler.ServeHTTP(denied,req)
- if denied.Code!=http.StatusUnauthorized {t.Fatalf("unauth setup: %d",denied.Code)}
- req=httptest.NewRequest(http.MethodPost,"/api/setup/init",strings.NewReader(`{"gateway":{"api_key":"replacement-auth"}}`))
- req.Header.Set("Authorization","Bearer initial-auth")
- accepted:=httptest.NewRecorder();s.server.Handler.ServeHTTP(accepted,req)
- if accepted.Code!=http.StatusOK {t.Fatalf("auth setup: %d %s",accepted.Code,accepted.Body.String())}
- req=httptest.NewRequest(http.MethodPut,"/api/setup/complete",strings.NewReader(`{"llm":{"api_key":"private-model-key"}}`))
- req.Header.Set("Authorization","Bearer replacement-auth")
- completed:=httptest.NewRecorder();s.server.Handler.ServeHTTP(completed,req)
- if completed.Code!=http.StatusOK {t.Fatalf("complete: %d %s",completed.Code,completed.Body.String())}
- loaded,err:=config.LoadConfig(s.configPath);if err!=nil {t.Fatal(err)}
- if loaded.Gateway.APIKey!="replacement-auth" || loaded.LLM.APIKey!="private-model-key" {t.Fatal("secure setup lost live secrets")}
+	t.Setenv("CLAWDROID_ANDROID_SECURE_SECRETS", "true")
+	for _, name := range []string{"CLAWDROID_LLM_API_KEY", "CLAWDROID_GATEWAY_API_KEY", "CLAWDROID_CHANNELS_TELEGRAM_TOKEN", "CLAWDROID_CHANNELS_DISCORD_TOKEN", "CLAWDROID_CHANNELS_SLACK_BOT_TOKEN", "CLAWDROID_CHANNELS_SLACK_APP_TOKEN", "CLAWDROID_CHANNELS_LINE_CHANNEL_SECRET", "CLAWDROID_CHANNELS_LINE_CHANNEL_ACCESS_TOKEN", "CLAWDROID_CHANNELS_WEBSOCKET_API_KEY", "CLAWDROID_TOOLS_WEB_BRAVE_API_KEY"} {
+		t.Setenv(name, "")
+	}
+	cfg := config.DefaultConfig()
+	cfg.Gateway.APIKey = "initial-auth"
+	cfg.Gateway.Port = 0
+	s := NewServer(cfg, filepath.Join(t.TempDir(), "config.json"), nil)
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/api/setup/init", strings.NewReader(`{"gateway":{"api_key":"replacement-auth"}}`))
+	denied := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(denied, req)
+	if denied.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth setup: %d", denied.Code)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/setup/init", strings.NewReader(`{"gateway":{"api_key":"replacement-auth"}}`))
+	req.Header.Set("Authorization", "Bearer initial-auth")
+	accepted := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(accepted, req)
+	if accepted.Code != http.StatusOK {
+		t.Fatalf("auth setup: %d %s", accepted.Code, accepted.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodPut, "/api/setup/complete", strings.NewReader(`{"llm":{"api_key":"private-model-key"}}`))
+	req.Header.Set("Authorization", "Bearer replacement-auth")
+	completed := httptest.NewRecorder()
+	s.server.Handler.ServeHTTP(completed, req)
+	if completed.Code != http.StatusOK {
+		t.Fatalf("complete: %d %s", completed.Code, completed.Body.String())
+	}
+	loaded, err := config.LoadConfig(s.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Gateway.APIKey != "replacement-auth" || loaded.LLM.APIKey != "private-model-key" {
+		t.Fatal("secure setup lost live secrets")
+	}
 }
 
 func TestAndroidAuthFailsClosedWithoutGatewayKey(t *testing.T) {
- t.Setenv("CLAWDROID_ANDROID_SECURE_SECRETS","true")
- s:=NewServer(config.DefaultConfig(),"unused",nil)
- called:=false
- handler:=s.authMiddleware(func(w http.ResponseWriter,r *http.Request){called=true})
- res:=httptest.NewRecorder()
- handler(res,httptest.NewRequest(http.MethodGet,"/api/config",nil))
- if called || res.Code!=http.StatusUnauthorized {t.Fatal("secure gateway skipped authentication")}
+	t.Setenv("CLAWDROID_ANDROID_SECURE_SECRETS", "true")
+	s := NewServer(config.DefaultConfig(), "unused", nil)
+	called := false
+	handler := s.authMiddleware(func(w http.ResponseWriter, r *http.Request) { called = true })
+	res := httptest.NewRecorder()
+	handler(res, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if called || res.Code != http.StatusUnauthorized {
+		t.Fatal("secure gateway skipped authentication")
+	}
 }

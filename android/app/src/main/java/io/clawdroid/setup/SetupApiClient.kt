@@ -21,15 +21,24 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.ensureActive
 import java.io.Closeable
 import java.io.IOException
 
 class SetupApiClient(private val settingsStore: GatewaySettingsStore, context: Context) : Closeable {
 
+    init { io.clawdroid.diagnostics.DiagnosticEvents.initialize(context) }
+
     private val vault = SecretVault(context)
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val client = HttpClient(OkHttp)
+    private val client = HttpClient(OkHttp) {
+        engine { config {
+            connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            readTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
+            writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        } }
+    }
 
     private val baseUrl: String get() = settingsStore.settings.value.httpBaseUrl
     private val apiKey: String get() = settingsStore.settings.value.apiKey
@@ -67,8 +76,9 @@ class SetupApiClient(private val settingsStore: GatewaySettingsStore, context: C
         }
     }
 
-    suspend fun connectOpenAi(key: String) {
+    suspend fun connectOpenAi(key: String) = kotlinx.coroutines.withTimeout(60000L) {
         settingsStore.awaitLoaded()
+        awaitLocalGateway()
         val transport = object : OpenAiSetupTransport {
             override suspend fun validate(key: String): Boolean {
                 val response = client.post("$baseUrl/api/openai/validate") {
@@ -77,7 +87,7 @@ class SetupApiClient(private val settingsStore: GatewaySettingsStore, context: C
                     setBody(buildJsonObject { put("api_key", key) }.toString())
                 }
                 val raw = response.bodyAsText()
-                if (!response.status.isSuccess()) throw openAiError(raw)
+                if (!response.status.isSuccess()) throw openAiError(raw, response.status.value)
                 val result = json.parseToJsonElement(raw).jsonObject
                 check(result["valid"]?.jsonPrimitive?.booleanOrNull == true) { "Проверка подключения не подтверждена" }
                 return result["configured"]?.jsonPrimitive?.booleanOrNull
@@ -102,7 +112,10 @@ class SetupApiClient(private val settingsStore: GatewaySettingsStore, context: C
                         })
                     }.toString())
                 }
-                if (!response.status.isSuccess()) throw OpenAiConnectionException("Не удалось сохранить подключение. Повторите попытку")
+                if (!response.status.isSuccess()) {
+                    io.clawdroid.diagnostics.DiagnosticEvents.record("openai", "save_failure", response.status.value)
+                    throw OpenAiConnectionException("Ключ проверен OpenAI, но встроенный сервер не сохранил настройки. Повторите попытку и выгрузите тестовый файл", "save_failure")
+                }
             }
         }
         val secrets = object : OpenAiSecretStore {
@@ -112,17 +125,36 @@ class SetupApiClient(private val settingsStore: GatewaySettingsStore, context: C
         OpenAiKeySetup(transport, secrets).connect(key)
     }
 
-    private fun openAiError(raw: String): OpenAiConnectionException {
-        val code = runCatching { json.parseToJsonElement(raw).jsonObject["error_code"]?.jsonPrimitive?.content }.getOrNull()
-        val message = when (code) {
-            "authentication" -> "OpenAI отклонил ключ. Проверьте его или создайте новый"
-            "quota" -> "В OpenAI API закончились средства или достигнут лимит. Проверьте баланс и ограничения"
-            "network" -> "Не удалось связаться с OpenAI. Проверьте интернет и повторите попытку"
-            "model" -> "Для этого ключа недоступна модель Джарвиса. Проверьте доступ в OpenAI"
-            "invalid_request" -> "Не удалось проверить ключ OpenAI. Проверьте настройки проекта API"
-            else -> "OpenAI временно недоступен. Повторите попытку позже"
+    /** Retry only the local readiness probe; never repeat billable Responses requests. */
+    private suspend fun awaitLocalGateway() {
+        repeat(10) { attempt ->
+            try {
+                val ready = kotlinx.coroutines.withTimeout(2000L) {
+                    val response = client.get("$baseUrl/api/config/schema") {
+                        header("Authorization", "Bearer $apiKey")
+                    }
+                    response.bodyAsText()
+                    response.status.value
+                }
+                if (ready == 200) return
+                if (ready == 401 || ready == 403) {
+                    throw OpenAiConnectionException("Встроенный сервер отклонил подключение. Перезапустите Джарвис и выгрузите тестовый файл", "local_gateway_auth")
+                }
+            } catch (error: OpenAiConnectionException) { throw error }
+            catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (_: Exception) { /* No raw network errors or response bodies enter diagnostics. */ }
+            if (attempt < 9) kotlinx.coroutines.delay(200)
         }
-        return OpenAiConnectionException(message)
+        throw OpenAiConnectionException("Встроенный сервер Джарвиса не запустился. Перезапустите приложение и выгрузите тестовый файл", "local_gateway_network")
+    }
+
+    private fun openAiError(raw: String, status: Int): OpenAiConnectionException {
+        val code = runCatching { json.parseToJsonElement(raw).jsonObject["error_code"]?.jsonPrimitive?.content }.getOrNull()
+        val failure = OpenAiFailure.from(code, status)
+        io.clawdroid.diagnostics.DiagnosticEvents.record("openai", failure.code, status)
+        return OpenAiConnectionException(failure.message, failure.code)
     }
 
     override fun close() {
