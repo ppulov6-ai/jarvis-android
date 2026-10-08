@@ -2,7 +2,10 @@ name: Диагностика установки на телефоне
 on:
   push:
     branches: [install-diagnostics]
-    paths: [.github/workflows/install-helper.yml]
+    paths: [.github/workflows/install-helper.yml, tools/install-check/**, scripts/build-install-helper.sh, scripts/test-install-helper.py]
+concurrency:
+  group: installer-diagnostics
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -15,6 +18,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Подготовить Android SDK 36
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"'
       - name: Собрать диагностический установщик
         run: bash scripts/build-install-helper.sh
       - name: Подготовить старую версию для проверки конфликта
