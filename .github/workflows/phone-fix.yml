@@ -1,0 +1,117 @@
+name: Исправить соединение и управление экраном
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: phone-fix
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Применить проверенный набор изменений
+        run: |
+          python3 - <<'PYCODE'
+          import json, hashlib
+          from pathlib import Path
+          source = Path('.github/phone-fix-bundle.json')
+          assert hashlib.sha256(source.read_bytes()).hexdigest() == 'ee4e7cedaffb5fda456093994ec161d47586411e81a7d0064da9f16a397723d5'
+          for item in json.loads(source.read_text()):
+              target = Path(item['path'])
+              assert not target.is_absolute() and '..' not in target.parts
+              assert str(target).startswith(('android/', 'pkg/')) or str(target) == 'README.md'
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(item['content'])
+          readme = Path('README.md')
+          text = readme.read_text()
+          text = text.replace('Неопределённые команды, нажатия, ввод, снимки экрана, intent и broadcast требуют разового подтверждения с параметрами.', 'Разрешение на снимки экрана, нажатия, жесты и ввод текста запрашивается один раз и сохраняется до отзыва в разделе «Разрешения». Неопределённые команды, intent и broadcast требуют подтверждения с параметрами.')
+          text = text.replace('Окно подтверждения действий защищено отдельно.', 'Окно подтверждения допускает снимки и после закрытия возвращает в предыдущее приложение.')
+          readme.write_text(text)
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Проверить Go дважды и собрать сервер
+        run: |
+          gofmt -w pkg
+          make generate
+          go test -count=20 ./pkg/cron
+          go test -count=2 ./...
+          make build-android-arm64
+      - name: Android проверки из чистого состояния 1
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew clean :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --no-build-cache --rerun-tasks --stacktrace
+      - name: Прочитать результаты тестов
+        if: always()
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for report in Path('android').glob('**/build/test-results/**/*.xml'):
+              root = ET.parse(report).getroot()
+              for case in root.iter('testcase'):
+                  for failure in case.findall('failure') + case.findall('error'):
+                      print('TEST FAILURE:', case.get('classname'), case.get('name'))
+                      print(failure.get('message'))
+                      print((failure.text or '')[:7000])
+          PYCODE
+      - name: Android проверки из чистого состояния 2
+        working-directory: android
+        run: |
+          ./gradlew clean :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --no-build-cache --rerun-tasks --stacktrace
+      - name: Сохранить APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jarvisjon-phone-fixes
+          path: android/app/build/outputs/apk/embedded/debug/*.apk
+          if-no-files-found: error
+      - name: Сохранить проверенные исходники
+        run: |
+          rm .github/phone-fix-bundle.json .github/workflows/phone-fix.yml
+          git add -N android pkg README.md
+          git diff --binary > checked-changes.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checked-source-changes
+          path: checked-changes.patch
+          if-no-files-found: error
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: checked-source-changes
+          path: verified
+      - uses: actions/download-artifact@v4
+        with:
+          name: Jarvisjon-phone-fixes
+          path: apk
+      - name: Сохранить исходники и выпуск APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          git apply verified/checked-changes.patch
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android pkg README.md .github/phone-fix-bundle.json .github/workflows/phone-fix.yml
+          git commit -m 'Сохранить разрешение экрана и исправить соединение чата'
+          git push origin HEAD:main
+          revision=$(git rev-parse HEAD)
+          mapfile -t files < <(find apk -name '*.apk' -type f)
+          test "${#files[@]}" -eq 1
+          cp "${files[0]}" Jarvisjon-ru-arm64.apk
+          gh release create "android-${revision:0:12}" Jarvisjon-ru-arm64.apk --repo "$GITHUB_REPOSITORY" --target "$revision" --prerelease --title 'Джарвисджон: соединение и управление экраном' --notes 'Тесты Go и Android выполнены дважды. Разрешение управления экраном сохраняется и отзывается в настройках. Окно подтверждения не возвращает в главный чат. Исправлено отключение соединения при навигации и потеря сообщений без соединения. Физический Samsung требует повторной проверки.'
