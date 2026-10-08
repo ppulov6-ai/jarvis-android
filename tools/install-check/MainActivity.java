@@ -27,7 +27,12 @@ public final class MainActivity extends Activity {
  public void onCreate(Bundle b){
   super.onCreate(b);
   prefs=getSharedPreferences("diagnostic",0);
-  if(prefs.getBoolean("busy",false)&&!preparing)prefs.edit().putBoolean("busy",false).putInt("status",-98).putString("message","Предыдущая подготовка прервана. Повторите установку.").commit();
+  if(prefs.getBoolean("busy",false)&&!preparing){
+   int state=prefs.getInt("status",-99);
+   PackageInstaller.SessionInfo info=getPackageManager().getPackageInstaller().getSessionInfo(prefs.getInt("session",-1));
+   if((state==-97&&(info==null||!info.isSealed()))||(state==PackageInstaller.STATUS_PENDING_USER_ACTION&&pending==null))
+    prefs.edit().putBoolean("busy",false).putInt("status",-98).putString("message","Предыдущий диалог или подготовка прерваны. Повторите установку.").commit();
+  }
   LinearLayout content=new LinearLayout(this);
   content.setOrientation(1);content.setPadding(28,36,28,24);content.setBackgroundColor(Color.rgb(250,247,238));
   TextView title=new TextView(this);title.setText("Проверка установки Джарвиса");title.setTextSize(24);title.setTextColor(Color.rgb(16,63,38));content.addView(title);
@@ -46,7 +51,7 @@ public final class MainActivity extends Activity {
  String statusName(int s){
   switch(s){
    case PackageInstaller.STATUS_SUCCESS:return "Установка завершена";
-   case PackageInstaller.STATUS_PENDING_USER_ACTION:return pending==null?"Ожидание подтверждения Android. Если диалог не появился, повторите установку.":"Подтвердите установку в Android";
+   case PackageInstaller.STATUS_PENDING_USER_ACTION:return pending==null?"Ожидание результата установки Android":"Подтвердите установку в Android";
    case PackageInstaller.STATUS_FAILURE_CONFLICT:return "Конфликт с установленным приложением";
    case PackageInstaller.STATUS_FAILURE_BLOCKED:return "Установка заблокирована системой";
    case PackageInstaller.STATUS_FAILURE_INVALID:return "Android отклонил APK";
