@@ -58,7 +58,8 @@ import io.clawdroid.core.domain.repository.AssistantConnection
 import io.clawdroid.core.domain.repository.TtsSettingsRepository
 import io.clawdroid.core.ui.theme.ClawDroidTheme
 import io.clawdroid.feature.chat.assistant.AssistantManager
-import io.clawdroid.feature.chat.assistant.AssistantPillBar
+import io.clawdroid.feature.chat.assistant.CosmosOrb
+import androidx.compose.runtime.LaunchedEffect
 import io.clawdroid.feature.chat.voice.CameraCaptureManager
 import io.clawdroid.feature.chat.voice.ScreenCaptureManager
 import io.clawdroid.feature.chat.voice.ScreenshotSource
@@ -90,7 +91,7 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
     private lateinit var screenCaptureManager: ScreenCaptureManager
 
     private var showAccessibilityGuide by mutableStateOf(false)
-    private var overlayAtTop by mutableStateOf(false)
+    private var orbExpanded by mutableStateOf(false)
     private var overlayView: View? = null
     private val windowManager by lazy { getSystemService(WINDOW_SERVICE) as WindowManager }
 
@@ -229,6 +230,7 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
     }
 
     private fun shutdown() {
+        if (::assistantManager.isInitialized) assistantManager.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -244,12 +246,25 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
         }
     }
 
-    private fun moveOverlayTo(top: Boolean) {
+    private fun updateOrbLayout(dx: Float = 0f, dy: Float = 0f) {
         val view = overlayView ?: return
-        val lp = view.layoutParams as? WindowManager.LayoutParams ?: return
-        lp.gravity = if (top) Gravity.TOP else Gravity.BOTTOM
+        val lp = view.layoutParams as WindowManager.LayoutParams
+        val density = resources.displayMetrics.density
+        val expanded = orbExpanded || showAccessibilityGuide
+        val metrics = windowManager.currentWindowMetrics
+        val insets = metrics.windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
+        val bounds = metrics.bounds
+        val availableWidth = (bounds.width() - insets.left - insets.right).coerceAtLeast(1)
+        val size = fitOrbSize(((if (expanded) 320 else 96) * density).toInt(),
+            ((if (expanded) 480 else 118) * density).toInt(), availableWidth,
+            bounds.height() - insets.top - insets.bottom)
+        lp.width = size.width
+        lp.height = size.height
+        val position = clampOrbPosition(lp.x + dx.toInt() - insets.left, lp.y + dy.toInt(), lp.width, lp.height,
+            availableWidth, bounds.height(), insets.top, insets.bottom)
+        lp.x = position.x + insets.left
+        lp.y = position.y
         windowManager.updateViewLayout(view, lp)
-        overlayAtTop = top
     }
 
     private fun setOverlayVisible(visible: Boolean) {
@@ -269,32 +284,19 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
         if (overlayView != null) return
 
         val density = resources.displayMetrics.density
-        val fixedHeightPx = (350 * density).toInt()
-
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            fixedHeightPx,
+            (96 * density).toInt(),
+            (118 * density).toInt(),
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = if (overlayAtTop) Gravity.TOP else Gravity.BOTTOM
+            gravity = Gravity.TOP or Gravity.START
+            x = windowManager.currentWindowMetrics.bounds.width() - width - (12 * density).toInt()
+            y = (windowManager.currentWindowMetrics.bounds.height() * .6f).toInt()
         }
-
-        val wrapper = object : FrameLayout(this@AssistantService) {
-            @Volatile var contentTop = fixedHeightPx
-            @Volatile var contentBottom = Int.MAX_VALUE
-            private var gestureInContent = false
-            override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-                if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
-                    gestureInContent = ev.y >= contentTop && ev.y <= contentBottom
-                }
-                if (!gestureInContent) return false
-                return super.dispatchTouchEvent(ev)
-            }
-        }
+        val wrapper = FrameLayout(this@AssistantService)
 
         wrapper.setViewTreeLifecycleOwner(this)
         wrapper.setViewTreeSavedStateRegistryOwner(this)
@@ -303,24 +305,22 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
             setContent {
                 ClawDroidTheme {
                     val state by assistantManager.state.collectAsState()
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = if (overlayAtTop) Alignment.TopCenter else Alignment.BottomCenter
-                    ) {
-                        AssistantPillBar(
+                    LaunchedEffect(orbExpanded, showAccessibilityGuide) { updateOrbLayout() }
+                    Box(modifier = Modifier.fillMaxSize().padding(4.dp), contentAlignment = Alignment.TopCenter) {
+                        CosmosOrb(
                             state = state,
-                            isAtTop = overlayAtTop,
-                            onClose = { shutdown() },
-                            onInterrupt = { assistantManager.interrupt() },
-                            onListeningPauseToggle = { assistantManager.toggleListeningPause() },
-                            onPositionChange = { top -> moveOverlayTo(top) },
-                            onCameraToggle = { handleCameraToggle() },
-                            onScreenCaptureToggle = { handleScreenCaptureToggle() },
+                            expanded = orbExpanded,
                             cameraCaptureManager = cameraCaptureManager,
-                            modifier = Modifier.onGloballyPositioned { coordinates ->
-                                wrapper.contentTop = coordinates.positionInWindow().y.toInt()
-                                wrapper.contentBottom = (coordinates.positionInWindow().y + coordinates.size.height).toInt()
-                            }
+                            onExpand = {
+                                if (orbExpanded && state.isCameraActive) handleCameraToggle()
+                                orbExpanded = !orbExpanded
+                            },
+                            onDrag = { dx, dy -> updateOrbLayout(dx, dy) },
+                            onStop = { shutdown() },
+                            onPause = { assistantManager.toggleListeningPause() },
+                            onInterrupt = { assistantManager.interrupt() },
+                            onCamera = { handleCameraToggle() },
+                            onScreen = { handleScreenCaptureToggle() }
                         )
                     }
 
@@ -388,6 +388,12 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
 
         windowManager.addView(wrapper, params)
         overlayView = wrapper
+        updateOrbLayout()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        updateOrbLayout()
     }
 
     private fun removeOverlay() {

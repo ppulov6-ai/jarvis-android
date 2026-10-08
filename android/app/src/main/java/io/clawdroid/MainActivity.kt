@@ -1,6 +1,8 @@
 package io.clawdroid
 
 import android.Manifest
+import android.content.Intent
+import io.clawdroid.assistant.AssistantActivity
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -26,6 +28,7 @@ import io.clawdroid.feature.chat.screen.ChatScreen
 import io.clawdroid.feature.chat.screen.SettingsScreen
 import io.clawdroid.navigation.NavRoutes
 import io.clawdroid.settings.AppSettingsScreen
+import io.clawdroid.setup.OpenAiSetupScreen
 import io.clawdroid.setup.SetupWizardScreen
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -63,7 +66,8 @@ class MainActivity : ComponentActivity() {
                 NavHost(navController = navController, startDestination = NavRoutes.CHAT) {
                     composable(NavRoutes.CHAT) {
                         ChatScreen(
-                            onNavigateToSettings = { navController.navigate(NavRoutes.SETTINGS) }
+                            onNavigateToSettings = { navController.navigate(NavRoutes.SETTINGS) },
+                            onLaunchAssistant = { startActivity(Intent(this@MainActivity, AssistantActivity::class.java)) }
                         )
                     }
                     composable(NavRoutes.SETTINGS) {
@@ -71,7 +75,13 @@ class MainActivity : ComponentActivity() {
                             onNavigateBack = { navController.popBackStack() },
                             onNavigateToBackendSettings = { navController.navigate(NavRoutes.BACKEND_SETTINGS) },
                             onNavigateToAppSettings = { navController.navigate(NavRoutes.appSettings()) },
+                            onNavigateToOpenAi = { navController.navigate(NavRoutes.OPENAI) },
+                            showAdvancedSettings = BuildConfig.FLAVOR != "embedded",
+                            onLaunchAssistant = { startActivity(Intent(this@MainActivity, AssistantActivity::class.java)) },
                         )
+                    }
+                    composable(NavRoutes.OPENAI) {
+                        OpenAiSetupScreen(onConnected = { navController.popBackStack() }, onBack = { navController.popBackStack() })
                     }
                     navigation(
                         route = NavRoutes.BACKEND_SETTINGS,

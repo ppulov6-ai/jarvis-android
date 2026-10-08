@@ -18,6 +18,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -62,6 +63,7 @@ import java.io.File
 @Composable
 fun ChatScreen(
     onNavigateToSettings: () -> Unit = {},
+    onLaunchAssistant: (() -> Unit)? = null,
     viewModel: ChatViewModel = koinViewModel()
 ) {
     val context = LocalContext.current
@@ -234,6 +236,9 @@ fun ChatScreen(
                         containerColor = Color.Transparent
                     ),
                     actions = {
+                        onLaunchAssistant?.let { launch ->
+                            TextButton(onClick = launch) { Text("Запустить шарик") }
+                        }
                         IconButton(onClick = onNavigateToSettings) {
                             Icon(
                                 painter = painterResource(LucideR.drawable.lucide_ic_settings),

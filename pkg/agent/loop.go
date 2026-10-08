@@ -9,6 +9,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+ "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,6 +69,7 @@ type activeProcess struct {
 
 // processOptions configures how a message is processed
 type processOptions struct {
+ ResponsesOutputSink *[]json.RawMessage
 	SessionKey      string            // Session identifier for history/context
 	Channel         string            // Target channel for tool execution
 	ChatID          string            // Target chat ID for tool execution
@@ -704,7 +706,9 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 	}
 
 	// 5. Run LLM iteration loop
-	finalContent, iteration, err := al.runLLMIteration(ctx, messages, opts, &currentStatus)
+	var finalResponsesOutput []json.RawMessage
+ opts.ResponsesOutputSink = &finalResponsesOutput
+ finalContent, iteration, err := al.runLLMIteration(ctx, messages, opts, &currentStatus)
 
 	if ctx.Err() != nil {
 		if !al.queueMessages {
@@ -734,7 +738,7 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 	}
 
 	// 6. Save final assistant message to session
-	al.sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
+	al.sessions.AddFullMessage(opts.SessionKey, providers.Message{Role:"assistant", Content:finalContent, ResponsesOutput:finalResponsesOutput})
 	_ = al.sessions.Save(opts.SessionKey)
 
 	// 7. Optional: summarization
@@ -829,6 +833,11 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 			response, err = al.provider.Chat(ctx, messages, providerToolDefs, al.model, llmOpts)
 
 			if err == nil {
+ if response.ReplayReset {
+ messages = providers.WithoutResponsesReplay(messages)
+ al.sessions.SetHistory(opts.SessionKey, providers.WithoutResponsesReplay(al.sessions.GetHistory(opts.SessionKey)))
+ _ = al.sessions.Save(opts.SessionKey)
+ }
 				break // Success
 			}
 
@@ -842,7 +851,9 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 			}
 
 			// Check for context window errors (provider specific, but usually contain "token" or "invalid")
-			isContextError := strings.Contains(errMsg, "token") ||
+			var openAIError *providers.OpenAIError
+ isTypedContextError := errors.As(err, &openAIError) && openAIError.Code == "context"
+ isContextError := isTypedContextError || strings.Contains(errMsg, "token") ||
 				strings.Contains(errMsg, "context") ||
 				strings.Contains(errMsg, "invalidparameter") ||
 				strings.Contains(errMsg, "length")
@@ -903,6 +914,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 
 		// Check if no tool calls - we're done
 		if len(response.ToolCalls) == 0 {
+ if opts.ResponsesOutputSink != nil { *opts.ResponsesOutputSink = response.ResponsesOutput }
 			finalContent = response.Content
 			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
 				map[string]interface{}{
@@ -928,6 +940,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 		assistantMsg := providers.Message{
 			Role:    "assistant",
 			Content: response.Content,
+ ResponsesOutput: response.ResponsesOutput,
 		}
 		for _, tc := range response.ToolCalls {
 			argumentsJSON, _ := json.Marshal(tc.Arguments)

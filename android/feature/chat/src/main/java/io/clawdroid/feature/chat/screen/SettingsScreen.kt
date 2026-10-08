@@ -70,6 +70,9 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToBackendSettings: () -> Unit,
     onNavigateToAppSettings: () -> Unit,
+    onNavigateToOpenAi: (() -> Unit)? = null,
+    showAdvancedSettings: Boolean = true,
+    onLaunchAssistant: (() -> Unit)? = null,
     viewModel: SettingsViewModel = koinViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -180,6 +183,13 @@ fun SettingsScreen(
                     color = NeonCyan
                 )
 
+                onLaunchAssistant?.let { launch ->
+                    NavigationCard(title = "Запустить шарик", subtitle = "Голосовой Джарвис поверх других приложений", onClick = launch)
+                }
+                onNavigateToOpenAi?.let { openAi ->
+                    NavigationCard(title = "OpenAI", subtitle = "Подключить или заменить ключ API", onClick = openAi)
+                }
+                if (showAdvancedSettings) {
                 NavigationCard(
                     title = stringResource(R.string.settings_backend_config),
                     subtitle = stringResource(R.string.settings_backend_config_desc),
@@ -191,6 +201,8 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.settings_app_settings_desc),
                     onClick = onNavigateToAppSettings,
                 )
+                }
+
             }
         }
     }

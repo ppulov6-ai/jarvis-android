@@ -33,6 +33,7 @@ import io.clawdroid.feature.chat.voice.CameraCaptureManager
 import io.clawdroid.feature.chat.voice.VoiceModeManager
 import io.clawdroid.settings.AppSettingsViewModel
 import io.clawdroid.settings.GatewaySettingsStoreImpl
+import io.clawdroid.setup.OpenAiSetupViewModel
 import io.clawdroid.setup.SetupApiClient
 import io.clawdroid.setup.SetupViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -140,4 +141,5 @@ val appModule = module {
     viewModel { SettingsViewModel(get(), get(), get()) }
     viewModel { AppSettingsViewModel(get(), get(), get()) }
     viewModel { SetupViewModel(get(), get()) }
+    viewModel { OpenAiSetupViewModel(get()) }
 }

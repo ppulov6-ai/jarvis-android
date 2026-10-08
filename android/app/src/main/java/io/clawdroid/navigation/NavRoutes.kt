@@ -7,6 +7,7 @@ object NavRoutes {
     const val BACKEND_SETTINGS_LIST = "backend_settings_list"
     const val BACKEND_SETTINGS_SECTION = "backend_settings/{sectionKey}"
     const val APP_SETTINGS = "app_settings?localOnly={localOnly}"
+    const val OPENAI = "openai"
     const val SETUP = "setup"
 
     fun appSettings(localOnly: Boolean = false): String =

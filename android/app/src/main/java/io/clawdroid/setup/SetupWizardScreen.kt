@@ -1,5 +1,6 @@
 package io.clawdroid.setup
 
+import io.clawdroid.BuildConfig
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.slideInHorizontally
@@ -26,6 +27,10 @@ fun SetupWizardScreen(
     onSetupComplete: () -> Unit,
     viewModel: SetupViewModel = koinViewModel(),
 ) {
+    if (BuildConfig.FLAVOR == "embedded") {
+        OpenAiSetupScreen(onConnected = onSetupComplete)
+        return
+    }
     val uiState by viewModel.uiState.collectAsState()
 
     // Step 0 (Gateway/auth): suppress back entirely

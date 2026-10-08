@@ -34,7 +34,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
       - name: Проверить Go и собрать встроенный модуль
         run: |
-          gofmt -w pkg/bus pkg/agent pkg/channels pkg/config pkg/gateway pkg/tools
+          gofmt -w pkg
           make generate
           go test ./...
           make build-android-arm64
@@ -50,3 +50,26 @@ jobs:
           path: android/app/build/outputs/apk/embedded/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+  publish:
+    name: Опубликовать APK
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: jarvis-android-arm64-debug
+          path: apk
+      - name: Создать предварительный выпуск
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t files < <(find apk -name '*.apk' -type f)
+          test "${#files[@]}" -eq 1
+          cp "${files[0]}" Jarvisjon-ru-arm64.apk
+          tag="android-${GITHUB_SHA:0:12}"
+          gh release create "$tag" Jarvisjon-ru-arm64.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Джарвисджон: Responses API и космо-шарик" --notes "Проверочная сборка ARM64. Подключение одним API-ключом OpenAI, русский интерфейс, космо-шарик, подтверждение действий и Стоп. Работа на физическом телефоне требует проверки."

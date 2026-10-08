@@ -1,6 +1,9 @@
 package providers
 
-import "context"
+import (
+ "context"
+ "encoding/json"
+)
 
 type ToolCall struct {
 	ID        string                 `json:"id"`
@@ -16,6 +19,8 @@ type FunctionCall struct {
 }
 
 type LLMResponse struct {
+ ReplayReset bool `json:"replay_reset,omitempty"`
+ ResponsesOutput []json.RawMessage `json:"responses_output,omitempty"`
 	Content      string     `json:"content"`
 	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
 	FinishReason string     `json:"finish_reason"`
@@ -29,6 +34,7 @@ type UsageInfo struct {
 }
 
 type Message struct {
+ ResponsesOutput []json.RawMessage `json:"responses_output,omitempty"`
 	Role       string     `json:"role"`
 	Content    string     `json:"content"`
 	Media      []string   `json:"media,omitempty"`

@@ -8,6 +8,7 @@ import (
 
 	"github.com/KarakuriAgent/clawdroid/pkg/config"
 	"github.com/KarakuriAgent/clawdroid/pkg/logger"
+ "github.com/KarakuriAgent/clawdroid/pkg/providers"
 )
 
 // Server is the Gateway HTTP server that exposes the Config API.
@@ -16,6 +17,7 @@ type Server struct {
 	configPath string
 	server     *http.Server
 	onRestart  func()
+ openAIProviderFactory func(string) providers.LLMProvider
 }
 
 // NewServer creates a new Gateway HTTP server.
@@ -30,6 +32,7 @@ func NewServer(cfg *config.Config, configPath string, onRestart func()) *Server 
 // Start begins listening for HTTP requests on the configured host:port.
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/openai/validate", s.authMiddleware(s.handleValidateOpenAI))
 	mux.HandleFunc("GET /api/config/schema", s.authMiddleware(s.handleGetSchema))
 	mux.HandleFunc("GET /api/config", s.authMiddleware(s.handleGetConfig))
 	mux.HandleFunc("PUT /api/config", s.authMiddleware(s.handlePutConfig))
