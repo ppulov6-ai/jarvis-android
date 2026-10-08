@@ -1,0 +1,64 @@
+name: Проверка установки APK
+on:
+  push:
+    branches: [install-diagnostics]
+    paths: [.github/workflows/apk-install-check.yml]
+permissions:
+  contents: read
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Скачать точные выпуски
+        run: |
+          mkdir -p evidence
+          curl --fail --location --retry 3 https://github.com/ppulov6-ai/jarvis-android/releases/download/android-e9f43f14bce1/Jarvisjon-ru-arm64.apk -o old.apk
+          curl --fail --location --retry 3 https://github.com/ppulov6-ai/jarvis-android/releases/download/android-42a6de892603/Jarvisjon-ru-arm64.apk -o new.apk
+          echo "514c896725d7fd14f3d1b2bd13926ecae140c704a45cdb26e9af1a0aaec23f96  old.apk" | sha256sum --check
+          echo "cf31e3dc73b6b5965cc39441a8b937a4a9a59ef8b9fa7b938402a65e6aa3f30f  new.apk" | sha256sum --check
+          for apk in old.apk new.apk; do
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk" | tee "evidence/$apk-signature.txt"
+          done
+      - name: Разрешить KVM для тестового эмулятора
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Установить на Android 16 дважды
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          disk-size: 8G
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            adb shell getprop ro.build.version.sdk
+            adb shell getprop ro.product.cpu.abilist
+            for pass in 1 2; do
+              adb uninstall ru.pulat.jarvis || true
+              adb install --no-streaming old.apk | tee evidence/old-clean-$pass.txt
+              adb shell pm path ru.pulat.jarvis | tee evidence/old-path-$pass.txt
+              grep -q Success evidence/old-clean-$pass.txt
+              adb uninstall ru.pulat.jarvis
+              adb install --no-streaming new.apk | tee evidence/new-clean-$pass.txt
+              adb shell pm path ru.pulat.jarvis | tee evidence/new-path-$pass.txt
+              grep -q Success evidence/new-clean-$pass.txt
+              adb uninstall ru.pulat.jarvis
+            done
+            adb install --no-streaming old.apk
+            adb install --no-streaming -r new.apk > evidence/update.txt 2>&1 || true
+            cat evidence/update.txt
+            grep -q INSTALL_FAILED_UPDATE_INCOMPATIBLE evidence/update.txt
+            adb logcat -d -v threadtime > evidence/logcat.txt
+      - name: Сохранить доказательства
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-install-evidence
+          path: evidence/
+          retention-days: 14
