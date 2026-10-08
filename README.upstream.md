@@ -1,0 +1,615 @@
+<p align="center">
+  <img src="assets/clawdroid.png" alt="ClawDroid" width="300">
+</p>
+
+# ClawDroid
+
+**[日本語版](README.ja.md)**
+
+Android AI assistant with an embedded Go backend. Install the APK, launch, and start chatting — no separate server setup needed. A Kotlin/Jetpack Compose app provides the chat UI, voice assistant, and device automation. For advanced users, a [Termux-based setup](#termux-version) is also available.
+
+Forked from [PicoClaw](https://github.com/sipeed/picoclaw).
+
+## Architecture
+
+```mermaid
+graph TB
+    subgraph apk["Android APK"]
+        subgraph android["Kotlin App"]
+            ChatUI["Chat UI<br/>(Compose)"]
+            Overlay["Assistant<br/>Overlay"]
+        end
+
+        subgraph backend["Go Backend (embedded)"]
+            Agent["Agent Loop"]
+            Tools["Tool Loop<br/>(40+ tools)"]
+            LLM["LLM"]
+            Services["MCP / Cron /<br/>Skills / Memory"]
+            Channels["Channels<br/>(Telegram, Discord, Slack, LINE etc.)"]
+        end
+    end
+
+    ChatUI -- "WebSocket<br/>ws://127.0.0.1:18793" --> Agent
+    Overlay -- "WebSocket<br/>ws://127.0.0.1:18793" --> Agent
+    Agent --> LLM
+    Agent --> Tools
+    Tools --> Services
+    Agent --> Channels
+```
+
+- **Go backend**: Single binary bundled inside the APK. Agent loop, tool execution, LLM calls, messaging channels, cron, heartbeat
+- **Android app** (`android/`): Chat UI, floating assistant overlay, accessibility-based device control, voice mode
+
+## Quick Start
+
+### Prerequisites
+
+- Android device
+- LLM API key (OpenAI, Anthropic, Gemini, etc.)
+
+### 1. Download
+
+Download the APK from [GitHub Releases](https://github.com/KarakuriAgent/clawdroid/releases).
+
+Choose the APK matching your device architecture:
+
+| Architecture | APK |
+|-------------|-----|
+| 64-bit ARM (most modern devices) | `clawdroid-<version>-arm64-v8a.apk` |
+| 32-bit ARM | `clawdroid-<version>-armeabi-v7a.apk` |
+| x86_64 (emulators) | `clawdroid-<version>-x86_64.apk` |
+| Universal (all architectures) | `clawdroid-<version>-universal.apk` |
+
+### 2. Install & Launch
+
+Install the APK and open the app. The Go backend starts automatically in the background.
+
+### 3. Initial Setup
+
+On first launch, a setup wizard guides you through the configuration:
+
+- Set your LLM model in `provider/model` format (e.g. `openai/gpt-4o`) and API key
+- See [Supported LLM Providers](#supported-llm-providers) for the full list
+- All settings can be changed later from the in-app settings screen
+
+### 4. Using the App
+
+**Chat**: Open the app and start chatting right away.
+
+**Assistant (overlay)**: To use ClawDroid as your device assistant, set it as the default:
+
+1. Open Android **Settings** > **Apps** > **Default apps** > **Digital assistant app**
+2. Select **ClawDroid**
+3. Long-press the Home button (or swipe from the corner on gesture navigation) to launch the assistant overlay
+
+The assistant overlay enables voice mode and device automation (tap, swipe, screenshot, etc.).
+
+## Configuration
+
+The embedded version uses the in-app settings GUI. The Termux version uses `~/.clawdroid/config.json`.
+
+All settings can be overridden by environment variables with the `CLAWDROID_` prefix (e.g. `CLAWDROID_LLM_API_KEY`). The env var name corresponds to the JSON path in uppercase with `_` separators.
+
+### LLM (`llm`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `model` | *(empty)* | `CLAWDROID_LLM_MODEL` | LLM model in `provider/model` format |
+| `api_key` | *(empty)* | `CLAWDROID_LLM_API_KEY` | API key for the LLM provider |
+| `base_url` | *(empty)* | `CLAWDROID_LLM_BASE_URL` | Custom API endpoint (OpenAI-compatible) |
+
+### Agent Defaults (`agents.defaults`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `workspace` | `~/.clawdroid/workspace` | `CLAWDROID_AGENTS_DEFAULTS_WORKSPACE` | Workspace directory path |
+| `data_dir` | `~/.clawdroid/data` | `CLAWDROID_AGENTS_DEFAULTS_DATA_DIR` | Data directory (memory, skills, cron, etc.) |
+| `restrict_to_workspace` | `true` | `CLAWDROID_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE` | Restrict file operations to workspace |
+| `max_tokens` | `8192` | `CLAWDROID_AGENTS_DEFAULTS_MAX_TOKENS` | Max output tokens per LLM call |
+| `context_window` | `128000` | `CLAWDROID_AGENTS_DEFAULTS_CONTEXT_WINDOW` | Context window size (tokens) |
+| `temperature` | `0` | `CLAWDROID_AGENTS_DEFAULTS_TEMPERATURE` | LLM sampling temperature |
+| `max_tool_iterations` | `10` | `CLAWDROID_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS` | Max tool call loops per request |
+| `queue_messages` | `false` | `CLAWDROID_AGENTS_DEFAULTS_QUEUE_MESSAGES` | Queue new messages instead of cancelling active processing |
+| `show_errors` | `true` | `CLAWDROID_AGENTS_DEFAULTS_SHOW_ERRORS` | Show error messages in chat |
+| `show_warnings` | `true` | `CLAWDROID_AGENTS_DEFAULTS_SHOW_WARNINGS` | Show warning messages in chat |
+
+### Gateway (`gateway`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `host` | `127.0.0.1` | `CLAWDROID_GATEWAY_HOST` | HTTP gateway bind address |
+| `port` | `18790` | `CLAWDROID_GATEWAY_PORT` | HTTP gateway port |
+
+### Channels (`channels`)
+
+#### WebSocket (`channels.websocket`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `enabled` | `true` | `CLAWDROID_CHANNELS_WEBSOCKET_ENABLED` | Enable WebSocket channel (Android app connection) |
+| `host` | `127.0.0.1` | `CLAWDROID_CHANNELS_WEBSOCKET_HOST` | Bind address |
+| `port` | `18793` | `CLAWDROID_CHANNELS_WEBSOCKET_PORT` | Port |
+| `path` | `/ws` | `CLAWDROID_CHANNELS_WEBSOCKET_PATH` | WebSocket path |
+| `allow_from` | `[]` | `CLAWDROID_CHANNELS_WEBSOCKET_ALLOW_FROM` | Allowed user IDs (empty = all) |
+
+#### Telegram (`channels.telegram`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `enabled` | `false` | `CLAWDROID_CHANNELS_TELEGRAM_ENABLED` | Enable Telegram bot |
+| `token` | *(empty)* | `CLAWDROID_CHANNELS_TELEGRAM_TOKEN` | Bot token from BotFather |
+| `proxy` | *(empty)* | `CLAWDROID_CHANNELS_TELEGRAM_PROXY` | SOCKS5/HTTP proxy URL |
+| `allow_from` | `[]` | `CLAWDROID_CHANNELS_TELEGRAM_ALLOW_FROM` | Allowed user/chat IDs |
+
+#### Discord (`channels.discord`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `enabled` | `false` | `CLAWDROID_CHANNELS_DISCORD_ENABLED` | Enable Discord bot |
+| `token` | *(empty)* | `CLAWDROID_CHANNELS_DISCORD_TOKEN` | Bot token |
+| `allow_from` | `[]` | `CLAWDROID_CHANNELS_DISCORD_ALLOW_FROM` | Allowed user IDs |
+
+#### Slack (`channels.slack`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `enabled` | `false` | `CLAWDROID_CHANNELS_SLACK_ENABLED` | Enable Slack bot |
+| `bot_token` | *(empty)* | `CLAWDROID_CHANNELS_SLACK_BOT_TOKEN` | Bot token (`xoxb-...`) |
+| `app_token` | *(empty)* | `CLAWDROID_CHANNELS_SLACK_APP_TOKEN` | App-level token (`xapp-...`) for Socket Mode |
+| `allow_from` | `[]` | `CLAWDROID_CHANNELS_SLACK_ALLOW_FROM` | Allowed user IDs |
+
+#### WhatsApp (`channels.whatsapp`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `enabled` | `false` | `CLAWDROID_CHANNELS_WHATSAPP_ENABLED` | Enable WhatsApp bridge |
+| `bridge_url` | `ws://localhost:3001` | `CLAWDROID_CHANNELS_WHATSAPP_BRIDGE_URL` | Bridge WebSocket URL |
+| `allow_from` | `[]` | `CLAWDROID_CHANNELS_WHATSAPP_ALLOW_FROM` | Allowed phone numbers/IDs |
+
+#### LINE (`channels.line`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `enabled` | `false` | `CLAWDROID_CHANNELS_LINE_ENABLED` | Enable LINE bot |
+| `channel_secret` | *(empty)* | `CLAWDROID_CHANNELS_LINE_CHANNEL_SECRET` | Channel secret |
+| `channel_access_token` | *(empty)* | `CLAWDROID_CHANNELS_LINE_CHANNEL_ACCESS_TOKEN` | Channel access token |
+| `webhook_host` | `127.0.0.1` | `CLAWDROID_CHANNELS_LINE_WEBHOOK_HOST` | Webhook server bind address |
+| `webhook_port` | `18791` | `CLAWDROID_CHANNELS_LINE_WEBHOOK_PORT` | Webhook server port |
+| `webhook_path` | `/webhook/line` | `CLAWDROID_CHANNELS_LINE_WEBHOOK_PATH` | Webhook path |
+| `allow_from` | `[]` | `CLAWDROID_CHANNELS_LINE_ALLOW_FROM` | Allowed user IDs |
+
+### Tools (`tools`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `exec.enabled` | `false` | `CLAWDROID_TOOLS_EXEC_ENABLED` | Shell command execution (disabled for safety) |
+| `android.enabled` | `true` | `CLAWDROID_TOOLS_ANDROID_ENABLED` | Android device automation |
+| `memory.enabled` | `true` | `CLAWDROID_TOOLS_MEMORY_ENABLED` | Long-term memory and daily notes |
+
+#### Android Action Categories (`tools.android`)
+
+Each category can be toggled with `tools.android.<category>.enabled`. Individual actions within a category can also be controlled with `tools.android.<category>.actions.<action>`.
+
+| Category Key | Default | Description |
+|-------------|---------|-------------|
+| `alarm.enabled` | `true` | Alarm and timer actions |
+| `calendar.enabled` | `true` | Calendar event actions |
+| `contacts.enabled` | `true` | Contact actions |
+| `communication.enabled` | `true` | Phone, SMS, email actions |
+| `media.enabled` | `true` | Media playback control |
+| `navigation.enabled` | `true` | Maps and navigation actions |
+| `device_control.enabled` | `true` | Device hardware control |
+| `settings.enabled` | `true` | System settings actions |
+| `web.enabled` | `true` | In-app browser and web search |
+| `clipboard.enabled` | `true` | Clipboard operations |
+
+#### Web Search (`tools.web`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `brave.enabled` | `false` | `CLAWDROID_TOOLS_WEB_BRAVE_ENABLED` | Enable Brave Search API |
+| `brave.api_key` | *(empty)* | `CLAWDROID_TOOLS_WEB_BRAVE_API_KEY` | Brave API key |
+| `brave.max_results` | `5` | `CLAWDROID_TOOLS_WEB_BRAVE_MAX_RESULTS` | Max search results |
+| `duckduckgo.enabled` | `true` | `CLAWDROID_TOOLS_WEB_DUCKDUCKGO_ENABLED` | Enable DuckDuckGo search (no API key needed) |
+| `duckduckgo.max_results` | `5` | `CLAWDROID_TOOLS_WEB_DUCKDUCKGO_MAX_RESULTS` | Max search results |
+
+#### MCP Servers (`tools.mcp`)
+
+Each entry is keyed by server name. Stdio and HTTP transports are supported.
+
+**Stdio transport:**
+
+| Key | Description |
+|-----|-------------|
+| `command` | Command to launch the server |
+| `args` | Command arguments |
+| `env` | Environment variables for the process |
+
+**HTTP transport:**
+
+| Key | Description |
+|-----|-------------|
+| `url` | Server URL |
+| `headers` | HTTP headers (e.g. Authorization) |
+
+**Common:**
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `description` | *(empty)* | Human-readable description |
+| `enabled` | `false` | Enable this server |
+| `idle_timeout` | `300` | Seconds before idle shutdown |
+
+### Heartbeat (`heartbeat`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `enabled` | `true` | `CLAWDROID_HEARTBEAT_ENABLED` | Enable periodic heartbeat |
+| `interval` | `30` | `CLAWDROID_HEARTBEAT_INTERVAL` | Interval in minutes (min 5) |
+
+### Rate Limits (`rate_limits`)
+
+| Key | Default | Env | Description |
+|-----|---------|-----|-------------|
+| `max_tool_calls_per_minute` | `30` | `CLAWDROID_RATE_LIMITS_MAX_TOOL_CALLS_PER_MINUTE` | Max tool calls per minute (0 = unlimited) |
+| `max_requests_per_minute` | `15` | `CLAWDROID_RATE_LIMITS_MAX_REQUESTS_PER_MINUTE` | Max LLM requests per minute (0 = unlimited) |
+
+## Supported LLM Providers
+
+Uses [any-llm-go](https://github.com/mozilla-ai/any-llm-go) as a unified adapter.
+
+| Provider | Model Format | Example |
+|----------|-------------|---------|
+| OpenAI | `openai/model` | `openai/gpt-4o` |
+| Anthropic | `anthropic/model` or `claude/model` | `anthropic/claude-3-5-sonnet` |
+| Google Gemini | `gemini/model` or `google/model` | `gemini/gemini-2.0-flash` |
+
+`base_url` can point to any OpenAI-compatible endpoint (xAI, DeepSeek, Groq, OpenRouter, Ollama, etc.).
+
+## Termux Version
+
+### Overview
+
+The Termux version runs the Go backend as a separate process in Termux instead of embedding it in the APK. The APK does not include the backend binary.
+
+### Prerequisites
+
+- Android device with [Termux](https://termux.dev) installed
+- LLM API key (OpenAI, Anthropic, Gemini, etc.)
+
+### Setup
+
+**1. Download the Go backend binary**
+
+Download from [GitHub Releases](https://github.com/KarakuriAgent/clawdroid/releases). Choose the binary matching your device architecture:
+
+| Architecture | Binary |
+|-------------|--------|
+| 64-bit ARM (most modern devices) | `clawdroid-linux-arm64` |
+| 32-bit ARM | `clawdroid-linux-arm` |
+| x86_64 | `clawdroid-linux-x86_64` |
+
+You can check your architecture in Termux with `uname -m`.
+
+**2. Install the binary**
+
+```bash
+cp ~/storage/downloads/clawdroid-linux-arm64 ~/.local/bin/clawdroid
+chmod +x ~/.local/bin/clawdroid
+```
+
+**3. Run initial setup**
+
+```bash
+clawdroid onboard
+```
+
+This creates `~/.clawdroid/config.json` and workspace templates.
+
+**4. Configure**
+
+```bash
+vi ~/.clawdroid/config.json
+```
+
+Add your LLM model and API key.
+
+**5. Install the Termux APK**
+
+Install the Termux-flavor APK (`clawdroid-noembedded-*.apk`) on the same device.
+
+**6. Start the backend**
+
+```bash
+clawdroid gateway
+```
+
+### CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `clawdroid gateway` | Start the full server (channels, cron, heartbeat, HTTP gateway) |
+| `clawdroid agent` | Interactive REPL mode |
+| `clawdroid agent -m "..."` | Send a single message |
+| `clawdroid onboard` | First-time setup wizard |
+| `clawdroid status` | Show config and connection status |
+| `clawdroid cron list\|add\|remove\|enable\|disable` | Manage scheduled tasks |
+| `clawdroid skills list\|show\|remove` | Manage skills |
+| `clawdroid version` | Print version info |
+
+Use `--debug` / `-d` with `gateway` or `agent` for verbose logging.
+
+## Tools
+
+ClawDroid provides 40+ built-in tools that the AI agent can use autonomously.
+
+### File Operations
+
+| Tool | Description |
+|------|-------------|
+| `read_file` | Read file contents |
+| `write_file` | Write content to a file |
+| `edit_file` | Search-and-replace editing |
+| `append_file` | Append content to a file |
+| `copy_file` | Copy files |
+| `list_dir` | List directory contents |
+
+File operations respect `restrict_to_workspace` when enabled.
+
+### Android Device Automation
+
+| Action | Description |
+|--------|-------------|
+| `screenshot` | Capture screen as JPEG |
+| `get_ui_tree` | Dump accessibility tree |
+| `tap` | Tap at coordinates |
+| `swipe` | Swipe gesture |
+| `text` | Input text |
+| `keyevent` | Send key event (back, home, etc.) |
+| `search_apps` | Search installed apps |
+| `launch_app` | Launch app by package name |
+| `app_info` | Get app details |
+| `broadcast` | Send Android broadcast |
+| `intent` | Send Android intent |
+
+UI automation actions (`screenshot`, `tap`, `swipe`, etc.) are only available from the assistant overlay, not the main chat UI.
+
+#### Category-based Actions
+
+Additional actions are organized into categories, each of which can be enabled/disabled in the configuration.
+
+| Category | Actions | Description |
+|----------|---------|-------------|
+| **Alarm** | `set_alarm`, `set_timer`, `dismiss_alarm`, `show_alarms` | Alarm and timer management |
+| **Calendar** | `create_event`, `query_events`, `update_event`, `delete_event`, `list_calendars`, `add_reminder` | Calendar event management |
+| **Contacts** | `search_contacts`, `get_contact_detail`, `add_contact` | Contact lookup and management |
+| **Communication** | `dial`, `compose_sms`, `compose_email` | Phone, SMS, and email |
+| **Media** | `media_play_pause`, `media_next`, `media_previous`, `play_music_search` | Media playback control |
+| **Navigation** | `navigate`, `search_nearby`, `show_map`, `get_current_location` | Maps and navigation |
+| **Device Control** | `flashlight`, `set_volume`, `set_ringer_mode`, `set_dnd`, `set_brightness` | Device hardware control |
+| **Settings** | `open_settings` | Open system settings |
+| **Web** | `open_url`, `web_search` | In-app browser and web search |
+| **Clipboard** | `clipboard_copy`, `clipboard_read` | Clipboard operations |
+
+### Web
+
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search the web (Brave API or DuckDuckGo) |
+| `web_fetch` | Fetch and extract text from a URL |
+
+### Agent & Task Management
+
+| Tool | Description |
+|------|-------------|
+| `subagent` | Synchronous sub-task delegation |
+| `spawn` | Asynchronous sub-task delegation |
+| `cron` | Schedule tasks (one-time, recurring, cron expressions) |
+| `memory` | Long-term memory and daily notes |
+| `message` | Cross-channel messaging |
+| `skill` | List and read skills |
+| `user` | User directory management (multi-user profiles) |
+| `exec` | Shell command execution (disabled by default) |
+| `exit` | End assistant/voice session |
+
+### MCP (Model Context Protocol)
+
+ClawDroid can connect to external MCP servers as tool providers.
+
+```json
+{
+  "tools": {
+    "mcp": {
+      "my-local-server": {
+        "command": "npx",
+        "args": ["-y", "@example/mcp-server"],
+        "description": "Local MCP server",
+        "enabled": true
+      },
+      "my-remote-server": {
+        "url": "https://mcp.example.com/mcp",
+        "headers": { "Authorization": "Bearer token" },
+        "description": "Remote MCP server",
+        "enabled": true,
+        "idle_timeout": 300
+      }
+    }
+  }
+}
+```
+
+Supports both **stdio** (local process) and **HTTP/Streamable** (remote) transports. Idle servers are automatically stopped after 5 minutes (configurable).
+
+## Android App
+
+### Features
+
+- **Chat UI** - Full chat interface built with Jetpack Compose
+- **Floating Assistant Overlay** - Always-accessible pill bar overlay (`SYSTEM_ALERT_WINDOW`)
+- **Voice Mode** - Continuous voice conversation loop (listen -> send -> think -> speak) with pause/resume listening support
+- **Replace Google Assistant** - Registered as `android.intent.action.ASSIST`; long-press home to activate
+- **Device Automation** - AccessibilityService-based tap, swipe, text input, screenshot capture
+- **Camera Capture** - Take photos during voice mode for visual context
+- **Message Persistence** - Local Room database for chat history
+
+### Permissions
+
+| Permission | Purpose |
+|-----------|---------|
+| `INTERNET` | LLM API calls, web tools |
+| `SYSTEM_ALERT_WINDOW` | Floating assistant overlay |
+| `RECORD_AUDIO` | Voice mode (STT) |
+| `CAMERA` | Photo capture |
+| `QUERY_ALL_PACKAGES` | App search and launch |
+| `POST_NOTIFICATIONS` | Foreground service notification |
+
+### Voice Mode
+
+Voice mode runs a continuous conversation loop:
+
+1. **Listening** - Android SpeechRecognizer captures speech
+2. **Sending** - Transcribed text sent to Go backend
+3. **Thinking** - Agent processes and calls tools
+4. **Speaking** - Response read aloud via TextToSpeech
+
+Responses are kept short (1-3 sentences) with natural spoken language. 30-second silence timeout.
+
+### Localization
+
+ClawDroid supports English and Japanese. The app automatically detects the device language and displays UI text accordingly. The Go backend receives the locale via WebSocket query parameter and HTTP `Accept-Language` header, translating status labels, config schema labels, and warning messages.
+
+To add a new language, add translations to:
+- Go: `pkg/i18n/messages_*.go` — call `register("xx", map[string]string{...})`
+- Android: `app/src/main/res/values-xx/strings.xml` and `feature/chat/src/main/res/values-xx/strings.xml`
+
+## Messaging Channels
+
+ClawDroid can be reached through multiple messaging platforms simultaneously.
+
+| Channel | Transport | Configuration |
+|---------|-----------|---------------|
+| WebSocket | Local WebSocket | Default on, `127.0.0.1:18793` |
+| Telegram | Bot API | Bot token required |
+| Discord | Bot API | Bot token required |
+| Slack | Socket Mode | Bot token + App token required |
+| WhatsApp | Bridge WebSocket | Bridge URL required |
+| LINE | Webhook | Channel secret + access token required |
+
+Each channel supports `allow_from` access control to restrict which users can interact.
+
+## Memory System
+
+- **Long-term memory** (`memory/MEMORY.md`) - Persistent knowledge base. The agent stores important facts here.
+- **Daily notes** (`memory/YYYYMM/YYYYMMDD.md`) - Daily journal entries. The last 3 days are included in the system prompt.
+
+## Heartbeat
+
+When enabled, the agent periodically checks in based on `HEARTBEAT.md` in the workspace. Default interval: 30 minutes. The heartbeat can trigger proactive actions like reminders or background tasks.
+
+## Skills
+
+Skills are defined as `SKILL.md` files and loaded from three directories:
+
+1. Workspace skills (`~/.clawdroid/data/skills/`)
+2. Global skills (`~/.clawdroid/skills/`)
+3. Built-in skills
+
+```bash
+clawdroid skills list            # List installed skills
+clawdroid skills show <name>     # Show skill details
+clawdroid skills remove <name>   # Remove a skill
+```
+
+## Workspace Files
+
+The workspace (`~/.clawdroid/data/`) contains template files that shape the agent's behavior:
+
+| File | Purpose |
+|------|---------|
+| `IDENTITY.md` | Bot name, version, capabilities |
+| `SOUL.md` | Personality and values |
+| `AGENT.md` | Operational guidelines |
+| `data/users.json` | User directory (multi-user profiles) |
+| `HEARTBEAT.md` | Heartbeat check template |
+
+## Build from Source
+
+### Go Backend
+
+The Go backend can be built and modified directly on Android within Termux. This means you can customize, extend, and rebuild on the device itself without a separate development machine.
+
+```bash
+# Install Go in Termux
+pkg install golang make git
+
+# Clone and build
+git clone https://github.com/KarakuriAgent/clawdroid.git
+cd clawdroid
+make build && make install
+```
+
+| Make Target | Description |
+|-------------|-------------|
+| `make build` | Build for current platform |
+| `make build-all` | Build for linux/amd64, arm64, arm |
+| `make install` | Install to `~/.local/bin` |
+| `make test` | Run tests |
+| `make check` | deps + fmt + vet + test |
+| `make clean` | Remove build artifacts |
+| `make uninstall` | Remove binary |
+| `make uninstall-all` | Remove binary + all data (`~/.clawdroid/`) |
+
+Static binaries (CGO_ENABLED=0). Build targets: `linux/amd64`, `linux/arm64`, `linux/arm`.
+
+### Android App
+
+Open `android/` in Android Studio or build with Gradle:
+
+```bash
+cd android
+
+# Embedded version (includes Go backend in APK)
+make build-android           # Build Go backend as jniLibs
+./gradlew assembleEmbeddedDebug
+
+# Termux version (no backend in APK)
+./gradlew assembleTermuxDebug
+```
+
+Package name: `io.clawdroid`
+
+## Project Structure
+
+```
+clawdroid/
+├── cmd/clawdroid/           # Go CLI entry point
+├── pkg/
+│   ├── agent/               # Agent loop, context builder, memory, sessions, voice prompt
+│   ├── bus/                  # Message bus (inbound/outbound channels)
+│   ├── channels/             # Messaging channel adapters
+│   ├── config/               # Configuration loading and structs
+│   ├── cron/                 # Scheduled task service
+│   ├── gateway/              # HTTP gateway server
+│   ├── heartbeat/            # Periodic heartbeat service
+│   ├── logger/               # Structured logging
+│   ├── mcp/                  # MCP client manager
+│   ├── providers/            # LLM provider adapter (any-llm-go)
+│   ├── skills/               # Skills loader (SKILL.md)
+│   ├── state/                # State persistence
+│   └── tools/                # All tool implementations
+├── android/
+│   ├── app/                  # Main app (AssistantService, AccessibilityService, DeviceController)
+│   ├── backend/
+│   │   ├── loader/           # Embedded backend loader (GatewayProcessManager)
+│   │   └── loader-noop/      # No-op loader for Termux flavor
+│   ├── core/                 # Shared core (data, domain, model, ui)
+│   └── feature/              # Feature modules (chat, settings)
+├── workspace/                # Template files (IDENTITY.md, SOUL.md, etc.)
+├── Makefile
+├── go.mod
+└── .goreleaser.yaml
+```
+
+## License
+
+[MIT License](LICENSE). Forked from [PicoClaw](https://github.com/sipeed/picoclaw).

@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="config_save">Сохранить</string>
+    <string name="config_show">Показать</string>
+    <string name="config_hide">Скрыть</string>
+    <string name="config_comma_separated">Значения через запятую</string>
+    <string name="config_internal_storage_only">Только внутренняя память</string>
+    <string name="config_internal_storage_saf">При выборе папки доступна только внутренняя память</string>
+    <string name="config_select_calendar">Выбрать календарь</string>
+    <string name="config_pick_each_time">Выбирать каждый раз</string>
+    <string name="config_cancel">Отмена</string>
+    <string name="config_back">Назад</string>
+    <string name="config_browse">Выбрать папку</string>
+    <string name="config_saved">Сохранено.</string>
+    <string name="config_saved_restarting">Сохранено. Сервер перезапускается…</string>
+    <string name="config_error_prefix">Ошибка: </string>
+    <string name="config_backend_config">Настройки сервера</string>
+    <string name="config_retry">Повторить</string>
+    <string name="config_connection_settings">Настройки подключения</string>
+    <string name="config_open">Открыть</string>
+    <string name="config_fields_count">Полей: %1$d</string>
+    <string name="config_select">Выбрать</string>
+</resources>

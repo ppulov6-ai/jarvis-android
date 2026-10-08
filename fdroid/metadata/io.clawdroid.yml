@@ -1,0 +1,46 @@
+AntiFeatures:
+  NonFreeNet:
+    en-US: Requires a third-party LLM API (OpenAI, Anthropic, etc.) to function.
+    ja: 動作にサードパーティのLLM API（OpenAI、Anthropic等）が必要です。
+Categories:
+  - AI Chat
+  - Internet
+  - System
+License: MIT
+AuthorName: KarakuriAgent
+SourceCode: https://github.com/KarakuriAgent/clawdroid
+IssueTracker: https://github.com/KarakuriAgent/clawdroid/issues
+Changelog: https://github.com/KarakuriAgent/clawdroid/releases
+
+AutoName: ClawDroid
+
+RepoType: git
+Repo: https://github.com/KarakuriAgent/clawdroid.git
+
+Builds:
+  - versionName: 0.4.1
+    versionCode: 5
+    commit: 8012ffdc8b6bf4e6ba96a1ace34983e6ed9ecebd
+    subdir: android/app
+    sudo:
+      - apt-get update
+      - apt-get install -y golang-go make
+    gradle:
+      - embedded
+    srclibs:
+      - go@go1.25.6
+    build:
+      - pushd $$go$$/src
+      - ./make.bash
+      - popd
+      - export GOPATH=$$go$$
+      - export PATH="$GOPATH/bin:$PATH"
+      - cd ../..
+      - make build-android
+    ndk: r27c
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+UpdateCheckData: android/app/build.gradle.kts|versionCode\s*=\s*(\d+)|VERSION|(.+)
+CurrentVersion: 0.4.1
+CurrentVersionCode: 5

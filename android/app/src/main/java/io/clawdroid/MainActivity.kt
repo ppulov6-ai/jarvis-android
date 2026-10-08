@@ -1,0 +1,146 @@
+package io.clawdroid
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.navigation
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import io.clawdroid.backend.config.ConfigSectionDetailScreen
+import io.clawdroid.backend.config.ConfigSectionListScreen
+import io.clawdroid.backend.config.ConfigViewModel
+import io.clawdroid.core.data.remote.WebSocketClient
+import io.clawdroid.core.ui.theme.ClawDroidTheme
+import io.clawdroid.feature.chat.screen.ChatScreen
+import io.clawdroid.feature.chat.screen.SettingsScreen
+import io.clawdroid.navigation.NavRoutes
+import io.clawdroid.settings.AppSettingsScreen
+import io.clawdroid.setup.SetupWizardScreen
+import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
+
+class MainActivity : ComponentActivity() {
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* User choice recorded; no further action needed. */ }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        requestNotificationPermissionIfNeeded()
+        enableEdgeToEdge()
+        setContent {
+            ClawDroidTheme {
+                val navController = rememberNavController()
+                val wsClient: WebSocketClient = koinInject()
+
+                // Observe setup_required state from server
+                LaunchedEffect(Unit) {
+                    wsClient.setupRequired.collect { required ->
+                        if (required) {
+                            val current = navController.currentDestination?.route
+                            if (current != NavRoutes.SETUP) {
+                                navController.navigate(NavRoutes.SETUP) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        }
+                    }
+                }
+
+                NavHost(navController = navController, startDestination = NavRoutes.CHAT) {
+                    composable(NavRoutes.CHAT) {
+                        ChatScreen(
+                            onNavigateToSettings = { navController.navigate(NavRoutes.SETTINGS) }
+                        )
+                    }
+                    composable(NavRoutes.SETTINGS) {
+                        SettingsScreen(
+                            onNavigateBack = { navController.popBackStack() },
+                            onNavigateToBackendSettings = { navController.navigate(NavRoutes.BACKEND_SETTINGS) },
+                            onNavigateToAppSettings = { navController.navigate(NavRoutes.appSettings()) },
+                        )
+                    }
+                    navigation(
+                        route = NavRoutes.BACKEND_SETTINGS,
+                        startDestination = NavRoutes.BACKEND_SETTINGS_LIST,
+                    ) {
+                        composable(NavRoutes.BACKEND_SETTINGS_LIST) { entry ->
+                            val parentEntry = remember(entry) {
+                                navController.getBackStackEntry(NavRoutes.BACKEND_SETTINGS)
+                            }
+                            val viewModel: ConfigViewModel = koinViewModel(viewModelStoreOwner = parentEntry)
+                            ConfigSectionListScreen(
+                                onNavigateBack = { navController.popBackStack() },
+                                onSectionSelected = { sectionKey ->
+                                    navController.navigate("backend_settings/$sectionKey")
+                                },
+                                onNavigateToAppSettings = {
+                                    navController.navigate(NavRoutes.appSettings(localOnly = true))
+                                },
+                                viewModel = viewModel,
+                            )
+                        }
+                        composable(
+                            NavRoutes.BACKEND_SETTINGS_SECTION,
+                            arguments = listOf(navArgument("sectionKey") { type = NavType.StringType }),
+                        ) { entry ->
+                            val parentEntry = remember(entry) {
+                                navController.getBackStackEntry(NavRoutes.BACKEND_SETTINGS)
+                            }
+                            val viewModel: ConfigViewModel = koinViewModel(viewModelStoreOwner = parentEntry)
+                            ConfigSectionDetailScreen(
+                                sectionKey = entry.arguments?.getString("sectionKey") ?: "",
+                                onNavigateBack = { navController.popBackStack() },
+                                viewModel = viewModel,
+                            )
+                        }
+                    }
+                    composable(
+                        NavRoutes.APP_SETTINGS,
+                        arguments = listOf(
+                            navArgument("localOnly") {
+                                type = NavType.BoolType
+                                defaultValue = false
+                            },
+                        ),
+                    ) {
+                        AppSettingsScreen(
+                            onNavigateBack = { navController.popBackStack() },
+                        )
+                    }
+                    composable(NavRoutes.SETUP) {
+                        SetupWizardScreen(
+                            onSetupComplete = {
+                                navController.navigate(NavRoutes.CHAT) {
+                                    popUpTo(NavRoutes.CHAT) { inclusive = true }
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+}

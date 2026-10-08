@@ -1,0 +1,38 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="connection_connecting">Подключение…</string>
+    <string name="connection_reconnecting">Повторное подключение…</string>
+    <string name="connection_disconnected">Нет подключения</string>
+    <string name="settings_title">Настройки</string>
+    <string name="settings_tts_section">Озвучивание текста</string>
+    <string name="settings_tts_speed">Скорость</string>
+    <string name="settings_tts_pitch">Высота голоса</string>
+    <string name="settings_tts_speaking">Озвучивание…</string>
+    <string name="settings_tts_test">Проверить голос</string>
+    <string name="settings_other_section">Другие настройки</string>
+    <string name="settings_backend_config">Настройки сервера</string>
+    <string name="settings_backend_config_desc">Настроить локальный сервер</string>
+    <string name="settings_app_settings">Настройки приложения</string>
+    <string name="settings_app_settings_desc">Параметры подключения к локальному серверу</string>
+    <string name="settings_system_default">По умолчанию в системе</string>
+    <string name="settings_engine_label">Синтезатор речи</string>
+    <string name="settings_voice_label">Голос</string>
+    <string name="settings_open">Открыть</string>
+    <string name="btn_back">Назад</string>
+    <string name="voice_close">Закрыть</string>
+    <string name="voice_camera_on">Включить камеру</string>
+    <string name="voice_camera_off">Выключить камеру</string>
+    <string name="voice_listening">Слушаю…</string>
+    <string name="voice_paused">Пауза</string>
+    <string name="voice_sending">Отправка…</string>
+    <string name="voice_thinking">Думаю…</string>
+    <string name="voice_speaking">Говорю…</string>
+    <string name="voice_error">Ошибка</string>
+    <string name="input_camera">Камера</string>
+    <string name="input_gallery">Галерея</string>
+    <string name="input_voice">Голос</string>
+    <string name="input_send">Отправить</string>
+    <string name="input_placeholder">Сообщение…</string>
+    <string name="chat_title">Джарвис</string>
+    <string name="chat_settings">Настройки</string>
+</resources>
