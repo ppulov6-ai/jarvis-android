@@ -71,7 +71,7 @@ public final class MainActivity extends Activity {
   if(prefs.getBoolean("busy",false))return;
   if(!getPackageManager().canRequestPackageInstalls()){
    prefs.edit().putString("message","Разрешите установку из этого приложения, вернитесь сюда и нажмите кнопку установки ещё раз.").apply();refresh();
-   startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+getPackageName())));return;
+   try{startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+getPackageName())));}catch(Exception e){failure(e);}return;
   }
   pending=null;preparing=true;
   prefs.edit().putBoolean("busy",true).putInt("status",-97).putString("message","Проверка файла и подготовка установки").commit();refresh();
