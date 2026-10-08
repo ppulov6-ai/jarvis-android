@@ -86,7 +86,11 @@ type processOptions struct {
 // createToolRegistry creates a tool registry with common tools.
 // This is shared between main agent and subagents.
 func createToolRegistry(workspace string, restrict bool, cfg *config.Config, msgBus *bus.MessageBus, dataDir string) *tools.ToolRegistry {
-	registry := tools.NewToolRegistry()
+	if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
+ workspace = filepath.Join(os.Getenv("HOME"), ".clawdroid", "workspace")
+ restrict = true
+ }
+ registry := tools.NewToolRegistry()
 
 	// File system tools
 	registry.Register(tools.NewReadFileTool(workspace, restrict))
@@ -150,6 +154,7 @@ func createToolRegistry(workspace string, restrict bool, cfg *config.Config, msg
 
 func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers.LLMProvider) *AgentLoop {
 	workspace := cfg.WorkspacePath()
+ if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" { workspace = filepath.Join(os.Getenv("HOME"), ".clawdroid", "workspace") }
 	dataDir := cfg.DataPath()
 	_ = os.MkdirAll(workspace, 0755)
 	_ = os.MkdirAll(dataDir, 0755)
@@ -175,8 +180,8 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 
 	// Register exit tool (for main agent only, voice/assistant mode)
 	exitTool := tools.NewExitTool()
-	exitTool.SetSendCallback(func(channel, chatID, content, msgType string) error {
-		msgBus.PublishOutbound(bus.OutboundMessage{
+	exitTool.SetContextSendCallback(func(ctx context.Context, channel, chatID, content, msgType string) error {
+		msgBus.PublishOutboundContext(ctx, bus.OutboundMessage{
 			Channel: channel,
 			ChatID:  chatID,
 			Content: content,

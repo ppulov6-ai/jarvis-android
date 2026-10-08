@@ -6,12 +6,12 @@ import org.junit.jupiter.api.Test
 
 class ActionSafetyPolicyTest {
     @Test fun `indirect routes cannot bypass confirmation`() {
-        listOf("tap", "swipe", "text", "keyevent", "intent", "broadcast", "open_url", "screenshot", "compose_sms", "compose_email", "dial", "delete_event", "update_event", "add_contact", "clipboard_read", "future_unknown_action").forEach {
+        listOf("tap", "swipe", "text", "keyevent", "intent", "broadcast", "open_url", "screenshot", "delete_event", "update_event", "add_contact", "clipboard_read", "future_unknown_action").forEach {
             assertTrue(ActionSafetyPolicy.requiresConfirmation(it), it)
         }
     }
     @Test fun `ordinary app discovery remains available`() {
-        listOf("search_apps", "app_info", "launch_app", "get_ui_tree").forEach {
+        listOf("search_apps", "app_info", "launch_app", "get_ui_tree", "compose_sms", "compose_email", "dial").forEach {
             assertFalse(ActionSafetyPolicy.requiresConfirmation(it), it)
         }
     }

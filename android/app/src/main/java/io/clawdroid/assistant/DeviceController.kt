@@ -3,6 +3,8 @@ package io.clawdroid.assistant
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.graphics.Rect
+import java.security.MessageDigest
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -58,7 +60,48 @@ class DeviceController {
         return service?.rootInActiveWindow
     }
 
-    suspend fun inputText(text: String): Boolean {
+    /** A bounded, complete fingerprint of the external foreground screen. */
+    fun captureApprovalScreen(): ApprovedScreen? {
+        val svc = service ?: return null
+        val root = svc.rootInActiveWindow ?: return null
+        val packageName = root.packageName?.toString() ?: return null
+        if (packageName == svc.packageName) return null
+        val digest = MessageDigest.getInstance("SHA-256")
+        var count = 0
+        var complete = true
+        fun add(value: String) {
+            if (value.length > 4096) { complete = false; return }
+            val bytes = value.toByteArray(Charsets.UTF_8)
+            digest.update(bytes.size.toString().toByteArray(Charsets.UTF_8))
+            digest.update(0.toByte())
+            digest.update(bytes)
+        }
+        fun visit(node: AccessibilityNodeInfo, depth: Int) {
+            if (++count > 300 || depth > 15) { complete = false; return }
+            if (!node.isVisibleToUser) return
+            if (node.isPassword) { complete = false; return }
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+            add(node.packageName?.toString().orEmpty())
+            add(node.className?.toString().orEmpty())
+            add(node.viewIdResourceName.orEmpty())
+            add(node.text?.toString().orEmpty())
+            add(node.contentDescription?.toString().orEmpty())
+            add(bounds.toString())
+            add("${node.isEnabled}:${node.isClickable}:${node.isEditable}:${node.isFocused}:${node.isSelected}:${node.isChecked}:${node.childCount}")
+            for (index in 0 until node.childCount) {
+                if (!complete) return
+                val child = node.getChild(index) ?: run { complete = false; return }
+                visit(child, depth + 1)
+            }
+        }
+        visit(root, 0)
+        if (!complete || count == 0) return null
+        val fingerprint = digest.digest().joinToString("") { "%02x".format(it) }
+        return ApprovedScreen(packageName, fingerprint, count)
+    }
+
+    suspend fun inputText(text: String, expectedPackage: String? = null): Boolean {
         val svc = service ?: return false
         val ownPackage = svc.packageName
         // Search non-overlay windows for the focused input field
@@ -67,9 +110,10 @@ class DeviceController {
             .firstNotNullOfOrNull { win ->
                 val root = win.root ?: return@firstNotNullOfOrNull null
                 if (root.packageName?.toString() == ownPackage) return@firstNotNullOfOrNull null
+                if (expectedPackage != null && root.packageName?.toString() != expectedPackage) return@firstNotNullOfOrNull null
                 root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             } ?: return false
-        if (focusedNode.isPassword) return false
+        if (focusedNode.isPassword || (expectedPackage != null && focusedNode.packageName?.toString() != expectedPackage)) return false
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }

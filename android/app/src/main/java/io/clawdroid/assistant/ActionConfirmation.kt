@@ -16,19 +16,22 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** Approval exists only in this process and is bound to one immutable request. */
 object ActionConfirmation {
-    data class Pending(val request: ToolRequest, val answer: CompletableDeferred<Boolean>, val stop: () -> Unit)
+    data class Pending(val request: ToolRequest, val answer: CompletableDeferred<Boolean>, val stop: () -> Unit, val screenContext: String?, val closed: CompletableDeferred<Unit>)
     private val pending = ConcurrentHashMap<String, Pending>()
     fun lookup(id: String): Pending? = pending[id]
-    suspend fun ask(context: Context, request: ToolRequest, stop: () -> Unit): Boolean {
+    suspend fun ask(context: Context, request: ToolRequest, stop: () -> Unit, screenContext: String? = null): Boolean {
         val id = UUID.randomUUID().toString()
-        val item = Pending(request, CompletableDeferred(), stop)
+        val item = Pending(request, CompletableDeferred(), stop, screenContext, CompletableDeferred())
         pending[id] = item
         try {
             withContext(Dispatchers.Main) {
                 context.startActivity(Intent(context, ActionConfirmationActivity::class.java)
                     .putExtra("approval_id", id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
-            return withTimeoutOrNull(60_000) { item.answer.await() } == true
+            val approved = withTimeoutOrNull(60_000) { item.answer.await() } == true
+            if (!approved) return false
+            // Never recheck the screen while the approval Activity still owns foreground.
+            return withTimeoutOrNull(2_000) { item.closed.await(); true } == true
         } finally {
             pending.remove(id)
             item.answer.complete(false)
@@ -61,7 +64,7 @@ class ActionConfirmationActivity : Activity() {
         }
         val dialog = AlertDialog.Builder(this)
             .setTitle("Подтвердите действие Джарвиса")
-            .setMessage("Действие: $title\n\nПараметры:\n${request.params ?: "нет"}\n\nРазрешение действует только один раз. Проверьте получателя, сумму и содержимое перед подтверждением.")
+            .setMessage("Действие: $title\n${approval.screenContext.orEmpty()}\n\nПараметры:\n${request.params ?: "нет"}\n\nРазрешение действует только один раз. Проверьте получателя, сумму и содержимое перед подтверждением.")
             .setPositiveButton("Разрешить один раз") { _, _ -> approval.answer.complete(true); finish() }
             .setNeutralButton("Стоп") { _, _ -> approval.stop(); approval.answer.complete(false); finish() }
             .setNegativeButton("Отменить") { _, _ -> approval.answer.complete(false); finish() }
@@ -74,6 +77,7 @@ class ActionConfirmationActivity : Activity() {
     }
     override fun onDestroy() {
         item?.answer?.complete(false)
+        item?.closed?.complete(Unit)
         super.onDestroy()
     }
 }

@@ -62,10 +62,18 @@ class ToolRequestHandler(
     suspend fun handle(request: ToolRequest): ToolResponse {
         return try {
             currentCoroutineContext().ensureActive()
+            val guarded = request.action in setOf("tap", "swipe", "text", "keyevent")
+            if (guarded) requireAccessibility(request)?.let { return it }
+            val approvedScreen = if (guarded) withOverlayHidden {
+                deviceController.captureApprovalScreen()
+            } else null
+            if (guarded && approvedScreen == null) {
+                return ToolResponse(request.requestId, false, error = "Не удалось безопасно зафиксировать экран приложения. Действие отменено")
+            }
             if (ActionSafetyPolicy.requiresConfirmation(request.action)) {
                 val approved = try {
                     withContext(Dispatchers.Main) { setOverlayVisibility(false) }
-                    ActionConfirmation.ask(context, request, onStop)
+                    ActionConfirmation.ask(context, request, onStop, approvedScreen?.description)
                 } finally {
                     withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
                 }
@@ -79,10 +87,10 @@ class ToolRequestHandler(
                 "launch_app" -> handleLaunchApp(request)
                 "screenshot" -> handleScreenshot(request)
                 "get_ui_tree" -> handleGetUiTree(request)
-                "tap" -> handleTap(request)
-                "swipe" -> handleSwipe(request)
-                "text" -> handleText(request)
-                "keyevent" -> handleKeyEvent(request)
+                "tap" -> handleTap(request, approvedScreen)
+                "swipe" -> handleSwipe(request, approvedScreen)
+                "text" -> handleText(request, approvedScreen)
+                "keyevent" -> handleKeyEvent(request, approvedScreen)
                 "broadcast" -> handleBroadcast(request)
                 "intent" -> handleIntent(request)
                 // Delegate to category handlers
@@ -373,7 +381,7 @@ class ToolRequestHandler(
         }
     }
 
-    private suspend fun handleTap(request: ToolRequest): ToolResponse {
+    private suspend fun handleTap(request: ToolRequest, approvedScreen: ApprovedScreen?): ToolResponse {
         requireAccessibility(request)?.let { return it }
 
         val x = request.params?.get("x")?.jsonPrimitive?.doubleOrNull?.toFloat()
@@ -382,7 +390,10 @@ class ToolRequestHandler(
             ?: return ToolResponse(request.requestId, false, error = "y coordinate required")
 
         return withOverlayHidden {
-            val success = deviceController.tap(x, y)
+            val success = ScreenApprovalGuard.execute(approvedScreen, deviceController.captureApprovalScreen()) {
+                currentCoroutineContext().ensureActive()
+                deviceController.tap(x, y)
+            } ?: return@withOverlayHidden changedScreen(request)
             ToolResponse(
                 request.requestId, success,
                 result = if (success) "Tapped at ($x, $y)" else null,
@@ -391,7 +402,7 @@ class ToolRequestHandler(
         }
     }
 
-    private suspend fun handleSwipe(request: ToolRequest): ToolResponse {
+    private suspend fun handleSwipe(request: ToolRequest, approvedScreen: ApprovedScreen?): ToolResponse {
         requireAccessibility(request)?.let { return it }
 
         val x = request.params?.get("x")?.jsonPrimitive?.doubleOrNull?.toFloat()
@@ -405,7 +416,10 @@ class ToolRequestHandler(
         val durationMs = request.params?.get("duration_ms")?.jsonPrimitive?.longOrNull ?: 300L
 
         return withOverlayHidden {
-            val success = deviceController.swipe(x, y, x2, y2, durationMs)
+            val success = ScreenApprovalGuard.execute(approvedScreen, deviceController.captureApprovalScreen()) {
+                currentCoroutineContext().ensureActive()
+                deviceController.swipe(x, y, x2, y2, durationMs)
+            } ?: return@withOverlayHidden changedScreen(request)
             ToolResponse(
                 request.requestId, success,
                 result = if (success) "Swiped from ($x,$y) to ($x2,$y2)" else null,
@@ -414,14 +428,17 @@ class ToolRequestHandler(
         }
     }
 
-    private suspend fun handleText(request: ToolRequest): ToolResponse {
+    private suspend fun handleText(request: ToolRequest, approvedScreen: ApprovedScreen?): ToolResponse {
         requireAccessibility(request)?.let { return it }
 
         val text = request.params?.get("text")?.jsonPrimitive?.contentOrNull
             ?: return ToolResponse(request.requestId, false, error = "text required")
 
         return withOverlayHidden {
-            val success = deviceController.inputText(text)
+            val success = ScreenApprovalGuard.execute(approvedScreen, deviceController.captureApprovalScreen()) {
+                currentCoroutineContext().ensureActive()
+                deviceController.inputText(text, approvedScreen?.packageName)
+            } ?: return@withOverlayHidden changedScreen(request)
             ToolResponse(
                 request.requestId, success,
                 result = if (success) "Text input: $text" else null,
@@ -430,27 +447,31 @@ class ToolRequestHandler(
         }
     }
 
-    private fun handleKeyEvent(request: ToolRequest): ToolResponse {
-        if (!deviceController.isAvailable) {
-            onAccessibilityNeeded()
-            return ToolResponse(request.requestId, false, error = "accessibility_required")
-        }
-
+    private suspend fun handleKeyEvent(request: ToolRequest, approvedScreen: ApprovedScreen?): ToolResponse {
+        requireAccessibility(request)?.let { return it }
         val key = request.params?.get("key")?.jsonPrimitive?.contentOrNull
             ?: return ToolResponse(request.requestId, false, error = "key required")
-
-        val success = when (key) {
-            "back" -> deviceController.pressBack()
-            "home" -> deviceController.pressHome()
-            "recents" -> deviceController.pressRecents()
-            else -> return ToolResponse(request.requestId, false, error = "Unknown key: $key")
+        return withOverlayHidden {
+            val success = ScreenApprovalGuard.execute(approvedScreen, deviceController.captureApprovalScreen()) {
+                currentCoroutineContext().ensureActive()
+                when (key) {
+                    "back" -> deviceController.pressBack()
+                    "home" -> deviceController.pressHome()
+                    "recents" -> deviceController.pressRecents()
+                    else -> return@withOverlayHidden ToolResponse(request.requestId, false, error = "Unknown key: $key")
+                }
+            } ?: return@withOverlayHidden changedScreen(request)
+            ToolResponse(
+                request.requestId, success,
+                result = if (success) "Key pressed: $key" else null,
+                error = if (!success) "Key event failed" else null
+            )
         }
-        return ToolResponse(
-            request.requestId, success,
-            result = if (success) "Key pressed: $key" else null,
-            error = if (!success) "Key event failed" else null
-        )
     }
+
+    private fun changedScreen(request: ToolRequest) = ToolResponse(
+        request.requestId, false, error = "Экран приложения изменился после подтверждения. Действие отменено; запросите новое подтверждение"
+    )
 
     private fun handleBroadcast(request: ToolRequest): ToolResponse {
         val action = request.params?.get("intent_action")?.jsonPrimitive?.contentOrNull

@@ -6,6 +6,7 @@ import "context"
 // Only active in voice/assistant input modes (controlled via ActivatableTool).
 type ExitTool struct {
 	sendCallback SendCallbackWithType
+ sendContextCallback func(context.Context, string, string, string, string) error
 	channel      string
 	chatID       string
 	inputMode    string
@@ -27,7 +28,7 @@ func (t *ExitTool) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"message": map[string]interface{}{
 				"type":        "string",
-				"description": "A short farewell message to speak before exiting (e.g. \"おやすみなさい\")",
+				"description": "A short farewell message to speak before exiting (e.g. \"Спокойной ночи\")",
 			},
 		},
 		"required": []string{"message"},
@@ -52,7 +53,7 @@ func (t *ExitTool) IsActive() bool {
 }
 
 func (t *ExitTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
-	if t.sendCallback == nil {
+	if t.sendCallback == nil && t.sendContextCallback == nil {
 		return ErrorResult("exit tool: send callback not configured")
 	}
 	if t.channel == "" || t.chatID == "" {
@@ -61,6 +62,11 @@ func (t *ExitTool) Execute(ctx context.Context, args map[string]interface{}) *To
 
 	message, _ := args["message"].(string)
 
-	_ = t.sendCallback(t.channel, t.chatID, message, "exit")
+	if ctx.Err() != nil { return ErrorResult("Действие остановлено") }
+ if t.sendContextCallback != nil { _ = t.sendContextCallback(ctx, t.channel, t.chatID, message, "exit") } else { _ = t.sendCallback(t.channel, t.chatID, message, "exit") }
 	return SilentResult("Exit signal sent.")
+}
+
+func (t *ExitTool) SetContextSendCallback(callback func(context.Context, string, string, string, string) error) {
+ t.sendContextCallback = callback
 }

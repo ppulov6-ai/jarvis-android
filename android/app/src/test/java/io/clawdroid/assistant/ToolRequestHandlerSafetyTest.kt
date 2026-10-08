@@ -18,37 +18,65 @@ class ToolRequestHandlerSafetyTest {
         unmockkAll()
         Dispatchers.resetMain()
     }
-    private fun request() = ToolRequest("one", "tap", buildJsonObject { put("x", 10); put("y", 20) })
+    private fun request() = ToolRequest(requestId = "one", action = "tap", params = buildJsonObject { put("x", 10); put("y", 20) })
+    private val approved = ApprovedScreen("com.example.messages", "screen-one", 25)
     private fun controller() = mockk<DeviceController> {
         every { isAvailable } returns true
+        every { captureApprovalScreen() } returns approved
         coEvery { tap(any(), any()) } returns true
     }
     @Test fun `rejected approval cannot execute a screen action`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         mockkObject(ActionConfirmation)
-        coEvery { ActionConfirmation.ask(any(), any(), any()) } returns false
+        coEvery { ActionConfirmation.ask(any(), any(), any(), any()) } returns false
         val device = controller()
         val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), {}, {})
         val response = handler.handle(request())
         assertFalse(response.success)
-        coVerify(exactly = 1) { ActionConfirmation.ask(any(), request(), any()) }
+        coVerify(exactly = 1) { ActionConfirmation.ask(any(), request(), any(), any()) }
         coVerify(exactly = 0) { device.tap(any(), any()) }
     }
     @Test fun `Stop while approval is pending cancels action and restores overlay`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         mockkObject(ActionConfirmation)
         val approval = CompletableDeferred<Boolean>()
-        coEvery { ActionConfirmation.ask(any(), any(), any()) } coAnswers { approval.await() }
+        coEvery { ActionConfirmation.ask(any(), any(), any(), any()) } coAnswers { approval.await() }
         val device = controller()
         val visibility = mutableListOf<Boolean>()
         val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), { visibility.add(it) }, {})
         val job = launch { handler.handle(request()) }
+        advanceTimeBy(150)
         runCurrent()
+        coVerify(exactly = 1) { ActionConfirmation.ask(any(), request(), any(), any()) }
         job.cancelAndJoin()
         approval.complete(true)
         runCurrent()
         assertTrue(job.isCancelled)
-        assertEquals(listOf(false, true), visibility)
+        assertEquals(listOf(false, true, false, true), visibility)
         coVerify(exactly = 0) { device.tap(any(), any()) }
     }
+    @Test fun `approved tap is blocked when the foreground screen changes`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        mockkObject(ActionConfirmation)
+        coEvery { ActionConfirmation.ask(any(), any(), any(), any()) } returns true
+        val device = controller()
+        every { device.captureApprovalScreen() } returnsMany listOf(approved, approved.copy(fingerprint = "another-recipient"))
+        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), {}, {})
+        val response = handler.handle(request())
+        assertFalse(response.success)
+        assertTrue(response.error.orEmpty().contains("Экран приложения изменился"))
+        coVerify(exactly = 1) { ActionConfirmation.ask(any(), request(), any(), approved.description) }
+        coVerify(exactly = 0) { device.tap(any(), any()) }
+    }
+
+    @Test fun `approved tap executes on the unchanged foreground screen`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        mockkObject(ActionConfirmation)
+        coEvery { ActionConfirmation.ask(any(), any(), any(), any()) } returns true
+        val device = controller()
+        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), {}, {})
+        assertTrue(handler.handle(request()).success)
+        coVerify(exactly = 1) { device.tap(10f, 20f) }
+    }
+
 }
