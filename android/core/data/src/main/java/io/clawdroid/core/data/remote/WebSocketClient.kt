@@ -3,6 +3,7 @@ package io.clawdroid.core.data.remote
 import android.util.Log
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.header
 import io.ktor.websocket.Frame
 import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.readText
@@ -30,7 +31,8 @@ class WebSocketClient(
     private val scope: CoroutineScope,
     private val clientId: String,
     private val clientType: String = "main",
-    private val context: Context
+    private val context: Context,
+    private val apiKeyProvider: () -> String = { "" }
 ) {
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -60,7 +62,10 @@ class WebSocketClient(
                     val separator = if ('?' in currentWsUrl) '&' else '?'
                     val locale = "ru"
                     val url = "${currentWsUrl}${separator}client_id=$clientId&client_type=$clientType&locale=$locale"
-                    client.webSocket(url) {
+                    client.webSocket(urlString = url, request = {
+                        val key = apiKeyProvider()
+                        if (key.isNotEmpty()) header("Authorization", "Bearer $key")
+                    }) {
                         session = this
                         _connectionState.value = ConnectionState.CONNECTED
                         retryDelay = INITIAL_DELAY
@@ -74,13 +79,13 @@ class WebSocketClient(
                                     }
                                     _incomingMessages.emit(msg)
                                 } catch (e: Exception) {
-                                    Log.w(TAG, "Failed to parse WebSocket message", e)
+                                    Log.w(TAG, "Не удалось прочитать сообщение сервера")
                                 }
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "WebSocket connection error", e)
+                    Log.w(TAG, "Ошибка подключения к серверу")
                 }
                 session = null
                 _connectionState.value = ConnectionState.RECONNECTING
@@ -102,7 +107,7 @@ class WebSocketClient(
             session?.send(Frame.Text(json.encodeToString(dto)))
             true
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to send WebSocket message", e)
+            Log.w(TAG, "Не удалось отправить сообщение")
             false
         }
     }

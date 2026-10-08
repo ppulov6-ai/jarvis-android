@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync"
  "strconv"
+ "strings"
 
 	"github.com/KarakuriAgent/clawdroid/pkg/broadcast"
 	"github.com/KarakuriAgent/clawdroid/pkg/bus"
@@ -44,6 +45,7 @@ type WebSocketChannel struct {
 	*BaseChannel
 	config      config.WebSocketConfig
 	configPath  string
+ secureEmbedded bool
 	server      *http.Server
 	upgrader    websocket.Upgrader
 	clients     map[*websocket.Conn]string // conn → clientID
@@ -56,12 +58,18 @@ type WebSocketChannel struct {
 }
 
 func NewWebSocketChannel(cfg config.WebSocketConfig, msgBus *bus.MessageBus, configPath string) (*WebSocketChannel, error) {
-	base := NewBaseChannel("websocket", cfg, msgBus, cfg.AllowFrom)
+	secure := os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true"
+ if secure {
+  cfg.APIKey = os.Getenv("CLAWDROID_GATEWAY_API_KEY")
+  if cfg.APIKey == "" { return nil, fmt.Errorf("Для защищённого WebSocket требуется ключ шлюза") }
+ }
+ base := NewBaseChannel("websocket", cfg, msgBus, cfg.AllowFrom)
 
 	return &WebSocketChannel{
 		BaseChannel: base,
 		config:      cfg,
 		configPath:  configPath,
+ secureEmbedded: secure,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -213,12 +221,10 @@ func (c *WebSocketChannel) maybeBroadcast(msg bus.OutboundMessage, clientType st
 }
 
 func (c *WebSocketChannel) handleWS(w http.ResponseWriter, r *http.Request) {
-	if key := c.config.APIKey; key != "" {
-		if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("api_key")), []byte(key)) != 1 {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-	}
+ if !c.authorizedRequest(r) {
+  http.Error(w, "unauthorized", http.StatusUnauthorized)
+  return
+ }
 
 	conn, err := c.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -394,4 +400,16 @@ func (c *WebSocketChannel) writeMessage(conn *websocket.Conn, data []byte) error
  c.writeMu.Lock()
  defer c.writeMu.Unlock()
  return conn.WriteMessage(websocket.TextMessage, data)
+}
+
+// Embedded Android connections must authenticate without leaking credentials
+// into URLs. Query authentication is retained only for standalone clients.
+func (c *WebSocketChannel) authorizedRequest(r *http.Request) bool {
+ key := c.config.APIKey
+ if key == "" { return !c.secureEmbedded }
+ header := r.Header.Get("Authorization")
+ supplied := ""
+ if strings.HasPrefix(header, "Bearer ") { supplied = strings.TrimPrefix(header, "Bearer ") }
+ if !c.secureEmbedded && header == "" { supplied = r.URL.Query().Get("api_key") }
+ return subtle.ConstantTimeCompare([]byte(supplied), []byte(key)) == 1
 }

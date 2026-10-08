@@ -74,6 +74,7 @@ import org.koin.android.ext.android.inject
 
 class AssistantService : LifecycleService(), SavedStateRegistryOwner {
 
+    private val gatewaySettings: io.clawdroid.backend.api.GatewaySettingsStore by inject()
     private val httpClient: HttpClient by inject()
     private val ttsSettingsRepo: TtsSettingsRepository by inject()
     private val screenshotSource: ScreenshotSource by inject()
@@ -115,7 +116,8 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
 
         serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-        connection = AssistantConnectionImpl(httpClient, applicationContext)
+        connection = AssistantConnectionImpl(httpClient, applicationContext,
+            apiKeyProvider = { gatewaySettings.settings.value.apiKey })
 
         toolRequestHandler = ToolRequestHandler(
             context = applicationContext,

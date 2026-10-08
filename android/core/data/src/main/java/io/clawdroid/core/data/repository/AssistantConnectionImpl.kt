@@ -32,12 +32,13 @@ typealias ToolRequestCallback = suspend (ToolRequest) -> String
 
 class AssistantConnectionImpl(
     private val httpClient: HttpClient,
-    private val context: Context
+    private val context: Context,
+    apiKeyProvider: () -> String = { "" }
 ) : AssistantConnection {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val clientId = UUID.randomUUID().toString()
-    private val wsClient = WebSocketClient(httpClient, scope, clientId, "assistant", context = context)
+    private val wsClient = WebSocketClient(httpClient, scope, clientId, "assistant", context = context, apiKeyProvider = apiKeyProvider)
     private val generation = AtomicLong(0)
     private val toolJobs = ConcurrentHashMap<String, Job>()
 
