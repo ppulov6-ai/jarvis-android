@@ -25,6 +25,12 @@ jobs:
               assert str(target).startswith(('android/', 'pkg/')) or str(target) == 'README.md'
               target.parent.mkdir(parents=True, exist_ok=True)
               target.write_text(item['content'])
+          exporter = Path('android/app/src/main/java/io/clawdroid/diagnostics/DiagnosticsExporter.kt')
+          before = '.setClipData(android.content.ClipData.newRawUri("Диагностика", uri))'
+          after = '.apply { clipData = android.content.ClipData.newRawUri("Диагностика", uri) }'
+          text = exporter.read_text()
+          assert text.count(before) == 1
+          exporter.write_text(text.replace(before, after))
           PYCODE
       - uses: actions/setup-go@v5
         with:
