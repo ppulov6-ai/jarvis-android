@@ -1,0 +1,98 @@
+name: Проверка исправлений на телефоне
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: device-fix
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Применить проверенный набор изменений
+        run: |
+          python3 - <<'PYCODE'
+          import json, hashlib
+          from pathlib import Path
+          source = Path('.github/device-fix-bundle.json')
+          assert hashlib.sha256(source.read_bytes()).hexdigest() == '039ec4294d1132dfb8fdfebaa754474e64f13c8590caab103aaa36c6e645c45f'
+          for item in json.loads(source.read_text()):
+              target = Path(item['path'])
+              assert not target.is_absolute() and '..' not in target.parts
+              assert str(target).startswith(('android/', 'pkg/')) or str(target) == 'README.md'
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(item['content'])
+          PYCODE
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Проверить Go дважды и собрать сервер
+        run: |
+          gofmt -w pkg
+          make generate
+          go test -count=2 ./...
+          make build-android-arm64
+      - name: Android проверки из чистого состояния 1
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew clean :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --stacktrace
+      - name: Android проверки из чистого состояния 2
+        working-directory: android
+        run: |
+          ./gradlew clean :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --stacktrace
+      - name: Сохранить APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jarvisjon-device-fixes
+          path: android/app/build/outputs/apk/embedded/debug/*.apk
+          if-no-files-found: error
+      - name: Сохранить проверенные исходники
+        run: |
+          rm .github/device-fix-bundle.json .github/workflows/device-fix.yml
+          git add -N android pkg README.md
+          git diff --binary > checked-changes.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checked-source-changes
+          path: checked-changes.patch
+          if-no-files-found: error
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: checked-source-changes
+          path: verified
+      - uses: actions/download-artifact@v4
+        with:
+          name: Jarvisjon-device-fixes
+          path: apk
+      - name: Сохранить исходники и выпуск APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          git apply verified/checked-changes.patch
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android pkg README.md .github/device-fix-bundle.json .github/workflows/device-fix.yml
+          git commit -m 'Исправить подключение, разрешения, снимки и диагностику; цвета ремонтного бота'
+          git push origin HEAD:main
+          revision=$(git rev-parse HEAD)
+          mapfile -t files < <(find apk -name '*.apk' -type f)
+          test "${#files[@]}" -eq 1
+          cp "${files[0]}" Jarvisjon-ru-arm64.apk
+          gh release create "android-${revision:0:12}" Jarvisjon-ru-arm64.apk --repo "$GITHUB_REPOSITORY" --target "$revision" --prerelease --title 'Джарвисджон: разрешения и диагностика' --notes 'Тесты Go и Android выполнены дважды. Таймаут подключения исправлен, добавлены разрешения и выгрузка тестового ZIP. Скриншоты разрешены с защитой открытого ключа. Цвета логотипа ремонтного бота. Проверка с реальным ключом и на физическом телефоне требуется отдельно.'
