@@ -20,6 +20,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -96,6 +97,15 @@ class ToolRequestHandler(
                     withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
                 }
                 currentCoroutineContext().ensureActive()
+                if (approved && guarded) {
+                    val restored = withOverlayHidden {
+                        withTimeoutOrNull(2_000) {
+                            while (!ScreenApprovalGuard.matches(approvedScreen, deviceController.captureApprovalScreen())) delay(50)
+                            true
+                        } == true
+                    }
+                    if (!restored) return changedScreen(request)
+                }
                 if (!approved) return ToolResponse(request.requestId, false, error = "Действие отменено: подтверждение не получено")
             }
             when (request.action) {

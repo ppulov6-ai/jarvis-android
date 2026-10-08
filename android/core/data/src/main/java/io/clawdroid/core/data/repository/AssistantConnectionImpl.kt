@@ -137,7 +137,7 @@ class AssistantConnectionImpl(
             images = images.ifEmpty { null },
             inputMode = inputMode
         )
-        wsClient.send(dto)
+        check(wsClient.send(dto)) { "Нет подключения к локальному серверу Джарвиса. Дождитесь подключения и повторите запрос." }
     }
 
     companion object {

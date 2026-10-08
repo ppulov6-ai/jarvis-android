@@ -119,7 +119,13 @@ class ChatRepositoryImplTest {
         fun `sendMessage marks as FAILED when websocket send fails`() = runTest {
             coEvery { webSocketClient.send(any<WsIncoming>()) } returns false
 
-            repository.sendMessage("fail")
+            var sendFailed = false
+            try {
+                repository.sendMessage("fail")
+            } catch (expected: IllegalStateException) {
+                sendFailed = true
+            }
+            assertEquals(true, sendFailed)
 
             coVerify { messageDao.update(match { it.status == "FAILED" }) }
         }

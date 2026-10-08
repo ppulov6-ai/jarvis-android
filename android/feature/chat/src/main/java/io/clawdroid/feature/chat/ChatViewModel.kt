@@ -121,6 +121,7 @@ class ChatViewModel(
     override fun onCleared() {
         super.onCleared()
         voiceModeManager.destroy()
-        disconnectChat()
+        // The application owns this shared connection. Navigating away must not
+        // disconnect the socket used by retained chat state and background tools.
     }
 }

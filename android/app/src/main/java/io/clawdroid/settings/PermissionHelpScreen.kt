@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import io.clawdroid.assistant.ActionConfirmation
 import io.clawdroid.assistant.DeviceController
 import org.koin.compose.koinInject
 
@@ -29,8 +30,10 @@ fun PermissionHelpScreen(onNavigateBack: () -> Unit) {
     var active by remember { mutableStateOf(controller.isAvailable) }
     var overlay by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var mic by remember { mutableStateOf(false) }
+    var deviceAccess by remember { mutableStateOf(ActionConfirmation.isDeviceAccessGranted(context)) }
     var launchError by remember { mutableStateOf<String?>(null) }
     fun refresh() {
+        deviceAccess = ActionConfirmation.isDeviceAccessGranted(context)
         active = controller.isAvailable
         overlay = Settings.canDrawOverlays(context)
         mic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -60,6 +63,10 @@ fun PermissionHelpScreen(onNavigateBack: () -> Unit) {
     }) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Управление экраном: ${if (deviceAccess) "разрешено без повторных запросов" else "потребуется подтверждение"}")
+            if (deviceAccess) {
+                OutlinedButton(onClick = { ActionConfirmation.revokeDeviceAccess(context); refresh() }) { Text("Отозвать разрешение управления экраном") }
+            }
             Text("Состояние разрешений", style = MaterialTheme.typography.titleMedium)
             Text("Специальные возможности: ${if (active) "служба работает" else "служба не подключена"}")
             Text("Поверх приложений: ${if (overlay) "разрешено" else "не разрешено"}")

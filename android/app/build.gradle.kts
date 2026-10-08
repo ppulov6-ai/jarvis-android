@@ -26,7 +26,7 @@ android {
         applicationId = "ru.pulat.jarvis"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 7
+        versionCode = 8
         versionName = appVersionName
     }
 

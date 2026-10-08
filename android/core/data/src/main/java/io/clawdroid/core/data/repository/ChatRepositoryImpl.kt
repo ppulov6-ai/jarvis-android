@@ -90,6 +90,7 @@ class ChatRepositoryImpl(
         val wsDto = MessageMapper.toWsIncoming(text, results.map { it.base64 }, inputMode).copy(generation = next)
         val success = webSocketClient.send(wsDto)
         messageDao.update(entity.copy(status = if (success) MessageStatus.SENT.name else MessageStatus.FAILED.name))
+        check(success) { "Нет подключения к локальному серверу Джарвиса. Дождитесь подключения и повторите запрос." }
     }
 
     override fun loadMore() {

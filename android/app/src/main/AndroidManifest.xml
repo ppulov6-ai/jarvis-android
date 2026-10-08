@@ -57,7 +57,8 @@
 
         <activity android:name=".assistant.ActionConfirmationActivity"
             android:exported="false" android:excludeFromRecents="true"
-            android:theme="@android:style/Theme.Material.Light.Dialog.Alert" />
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Material.Dialog.Alert" />
 
         <activity
             android:name=".MainActivity"

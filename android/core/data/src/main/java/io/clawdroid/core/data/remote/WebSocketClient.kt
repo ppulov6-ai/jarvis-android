@@ -10,6 +10,7 @@ import io.ktor.websocket.readText
 import io.clawdroid.core.data.remote.dto.WsIncoming
 import io.clawdroid.core.data.remote.dto.WsOutgoing
 import io.clawdroid.core.domain.model.ConnectionState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -84,6 +85,8 @@ class WebSocketClient(
                             }
                         }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.w(TAG, "Ошибка подключения к серверу")
                 }
@@ -103,9 +106,13 @@ class WebSocketClient(
     }
 
     suspend fun send(dto: WsIncoming): Boolean {
+        val activeSession = session ?: return false
+        if (!activeSession.isActive) return false
         return try {
-            session?.send(Frame.Text(json.encodeToString(dto)))
+            activeSession.send(Frame.Text(json.encodeToString(dto)))
             true
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "Не удалось отправить сообщение")
             false

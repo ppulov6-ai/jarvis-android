@@ -59,16 +59,14 @@ class ClawDroidApp : Application() {
                 backendLifecycle.state,
             ) { settings, state -> settings to state }
                 .filter { (_, state) -> state == BackendState.RUNNING }
-                .map { (settings, _) -> settings }
-                .distinctUntilChanged()
                 .collect {
                     // Fetch WS connection info from config API
                     val wsUrl = fetchWsUrl(configApiClient)
-                    if (wsClient.wsUrl != wsUrl) {
-                        wsClient.disconnect()
-                        wsClient.wsUrl = wsUrl
-                        wsClient.connect()
-                    }
+                    wsClient.disconnect()
+                    wsClient.wsUrl = wsUrl
+                    // Also reconnect when credentials/backend readiness change at
+                    // the same URL, or a previously disconnected client is retained.
+                    wsClient.connect()
                 }
         }
     }

@@ -5,7 +5,6 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.view.WindowManager
 import io.clawdroid.core.data.remote.dto.ToolRequest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -14,12 +13,19 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-/** Approval exists only in this process and is bound to one immutable request. */
+/** Pending requests are immutable; device access can be explicitly remembered and revoked. */
 object ActionConfirmation {
     data class Pending(val request: ToolRequest, val answer: CompletableDeferred<Boolean>, val stop: () -> Unit, val screenContext: String?, val closed: CompletableDeferred<Unit>)
     private val pending = ConcurrentHashMap<String, Pending>()
+    private val deviceActions = setOf("screenshot", "tap", "swipe", "text", "keyevent")
+    private fun preferences(context: Context) = context.getSharedPreferences("device_access_consent", Context.MODE_PRIVATE)
+    fun isDeviceAccessGranted(context: Context): Boolean = preferences(context).getBoolean("granted", false)
+    fun revokeDeviceAccess(context: Context) { preferences(context).edit().putBoolean("granted", false).commit() }
+    fun canRemember(action: String): Boolean = action in deviceActions
+    fun grantDeviceAccess(context: Context): Boolean = preferences(context).edit().putBoolean("granted", true).commit()
     fun lookup(id: String): Pending? = pending[id]
     suspend fun ask(context: Context, request: ToolRequest, stop: () -> Unit, screenContext: String? = null): Boolean {
+        if (canRemember(request.action) && isDeviceAccessGranted(context)) return true
         val id = UUID.randomUUID().toString()
         val item = Pending(request, CompletableDeferred(), stop, screenContext, CompletableDeferred())
         pending[id] = item
@@ -43,7 +49,6 @@ class ActionConfirmationActivity : Activity() {
     private var item: ActionConfirmation.Pending? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         if (android.os.Build.VERSION.SDK_INT >= 31) window.setHideOverlayWindows(true)
         item = intent.getStringExtra("approval_id")?.let(ActionConfirmation::lookup)
         val approval = item ?: run { finish(); return }
@@ -62,10 +67,18 @@ class ActionConfirmationActivity : Activity() {
             "clipboard_read" -> "Чтение буфера обмена"
             else -> "Команда ${request.action}"
         }
+        val remember = ActionConfirmation.canRemember(request.action)
+        val explanation = if (remember)
+            "Разрешить Джарвису читать и передавать экран подключённой модели, выполнять нажатия, жесты и ввод текста по вашим командам. Разрешение сохраняется. Отключить его можно в настройках Джарвиса → Разрешения."
+        else "Проверьте параметры перед подтверждением этого действия."
         val dialog = AlertDialog.Builder(this)
             .setTitle("Подтвердите действие Джарвиса")
-            .setMessage("Действие: $title\n${approval.screenContext.orEmpty()}\n\nПараметры:\n${request.params ?: "нет"}\n\nРазрешение действует только один раз. Проверьте получателя, сумму и содержимое перед подтверждением.")
-            .setPositiveButton("Разрешить один раз") { _, _ -> approval.answer.complete(true); finish() }
+            .setMessage("Действие: $title\n${approval.screenContext.orEmpty()}\n\nПараметры:\n${request.params ?: "нет"}\n\n$explanation")
+            .setPositiveButton(if (remember) "Разрешить и запомнить" else "Разрешить") { _, _ ->
+                val saved = !remember || ActionConfirmation.grantDeviceAccess(this)
+                approval.answer.complete(saved)
+                finish()
+            }
             .setNeutralButton("Стоп") { _, _ -> approval.stop(); approval.answer.complete(false); finish() }
             .setNegativeButton("Отменить") { _, _ -> approval.answer.complete(false); finish() }
             .setOnCancelListener { approval.answer.complete(false); finish() }

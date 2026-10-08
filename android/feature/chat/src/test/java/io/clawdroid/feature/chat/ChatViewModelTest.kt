@@ -1,5 +1,6 @@
 package io.clawdroid.feature.chat
 
+import androidx.lifecycle.ViewModelStore
 import io.clawdroid.core.domain.model.ChatMessage
 import io.clawdroid.core.domain.model.ConnectionState
 import io.clawdroid.core.domain.model.ImageAttachment
@@ -75,6 +76,15 @@ class ChatViewModelTest {
     @AfterEach
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `clearing chat screen preserves application connection`() {
+        val store = ViewModelStore()
+        store.put("chat", viewModel)
+        store.clear()
+        verify(exactly = 0) { disconnectChat() }
+        verify { voiceModeManager.destroy() }
     }
 
     @Test
