@@ -1,6 +1,7 @@
 package bus
 
 type InboundMessage struct {
+ Generation int64 `json:"generation,omitempty"`
 	Channel    string            `json:"channel"`
 	SenderID   string            `json:"sender_id"`
 	ChatID     string            `json:"chat_id"`
@@ -11,6 +12,7 @@ type InboundMessage struct {
 }
 
 type OutboundMessage struct {
+ Generation int64 `json:"generation,omitempty"`
 	Channel string `json:"channel"`
 	ChatID  string `json:"chat_id"`
 	Content string `json:"content"`

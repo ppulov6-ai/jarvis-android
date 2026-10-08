@@ -260,6 +260,9 @@ fun ChatScreen(
                 )
 
                 StatusIndicator(label = uiState.statusLabel)
+                androidx.compose.material3.TextButton(
+                    onClick = { viewModel.onEvent(ChatEvent.OnStopClick) }
+                ) { androidx.compose.material3.Text("Стоп") }
 
                 ImagePreviewRow(
                     images = uiState.pendingImages,

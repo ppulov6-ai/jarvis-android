@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+ "strconv"
 
 	"github.com/KarakuriAgent/clawdroid/pkg/broadcast"
 	"github.com/KarakuriAgent/clawdroid/pkg/bus"
@@ -21,6 +22,7 @@ import (
 
 // wsIncoming is the JSON message sent from APK to clawdroid.
 type wsIncoming struct {
+ Generation int64 `json:"generation,omitempty"`
 	Content   string   `json:"content"`
 	SenderID  string   `json:"sender_id,omitempty"`
 	Images    []string `json:"images,omitempty"`
@@ -31,6 +33,7 @@ type wsIncoming struct {
 
 // wsOutgoing is the JSON message sent from clawdroid to APK.
 type wsOutgoing struct {
+ Generation int64 `json:"generation,omitempty"`
 	Content string `json:"content"`
 	Type    string `json:"type,omitempty"`
 }
@@ -47,6 +50,7 @@ type WebSocketChannel struct {
 	chatConns   map[string]*websocket.Conn // chatID → conn
 	clientTypes map[string]string          // chatID → clientType (retained after disconnect)
 	mu          sync.RWMutex
+ writeMu sync.Mutex
 	ctx         context.Context
 	cancel      context.CancelFunc
 }
@@ -143,12 +147,18 @@ func (c *WebSocketChannel) Send(ctx context.Context, msg bus.OutboundMessage) er
 	clientType := c.clientTypes[msg.ChatID] // Read under lock to avoid data race
 	c.mu.RUnlock()
 
+	if (msg.Type == "tool_request" || msg.Type == "tool_cancel") && msg.Generation == 0 {
+ var request struct { Generation int64 `json:"generation"` }
+ _ = json.Unmarshal([]byte(msg.Content), &request)
+ msg.Generation = request.Generation
+ }
+ if !c.bus.IsCurrent("websocket:"+msg.ChatID, msg.Generation) { return nil }
 	if !ok {
 		// Connection not found — try broadcast fallback for "main" clients.
 		return c.maybeBroadcast(msg, clientType, fmt.Errorf("no connection for chat %s", msg.ChatID))
 	}
 
-	out := wsOutgoing{Content: msg.Content, Type: msg.Type}
+ out := wsOutgoing{Content: msg.Content, Type: msg.Type, Generation: msg.Generation}
 	data, err := json.Marshal(out)
 	if err != nil {
 		return fmt.Errorf("failed to marshal response: %w", err)
@@ -162,7 +172,7 @@ func (c *WebSocketChannel) Send(ctx context.Context, msg bus.OutboundMessage) er
 		return c.maybeBroadcast(msg, c.clientTypes[msg.ChatID], fmt.Errorf("connection for chat %s no longer active", msg.ChatID))
 	}
 
-	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+	if err := c.writeMessage(conn, data); err != nil {
 		logger.ErrorCF("websocket", "Failed to send message", map[string]interface{}{
 			"chat_id": msg.ChatID,
 			"error":   err.Error(),
@@ -259,7 +269,7 @@ func (c *WebSocketChannel) handleWS(w http.ResponseWriter, r *http.Request) {
 				Type:    "setup_required",
 			}
 			if data, err := json.Marshal(setupMsg); err == nil {
-				if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				if err := c.writeMessage(conn, data); err != nil {
 					logger.ErrorCF("websocket", "Failed to send setup_required", map[string]interface{}{
 						"client_id": clientID,
 						"error":     err.Error(),
@@ -283,6 +293,7 @@ func (c *WebSocketChannel) GetClientType(chatID string) string {
 
 func (c *WebSocketChannel) readPump(conn *websocket.Conn, clientID, chatID, clientType, locale string) {
 	defer func() {
+ c.bus.InvalidateSession("websocket:"+chatID)
 		c.mu.Lock()
 		delete(c.clients, conn)
 		delete(c.chatConns, chatID)
@@ -321,7 +332,22 @@ func (c *WebSocketChannel) readPump(conn *websocket.Conn, clientID, chatID, clie
 			continue
 		}
 
-		// Intercept tool_response messages: deliver to ResponseWaiter, skip inbound bus.
+		session := "websocket:" + chatID
+        if incoming.Type == "cancel" {
+            if !c.IsAllowed(clientID) { continue }
+            if c.bus.SetGeneration(session, incoming.Generation) {
+                c.bus.CancelSession(session, incoming.Generation)
+                c.bus.PublishOutbound(bus.OutboundMessage{Channel: "websocket", ChatID: chatID, Type: "cancelled", Generation: incoming.Generation})
+            }
+            continue
+        }
+        if incoming.Type == "tool_response" && !c.bus.IsCurrent(session, incoming.Generation) { continue }
+        if incoming.Type != "tool_response" && incoming.Generation > 0 {
+ if !c.IsAllowed(clientID) || !c.bus.SetGeneration(session, incoming.Generation) { continue }
+ c.bus.CancelSession(session, incoming.Generation-1)
+ }
+
+        // Intercept tool_response messages: deliver to ResponseWaiter, skip inbound bus.
 		if incoming.Type == "tool_response" && incoming.RequestID != "" {
 			tools.DeviceResponseWaiter.Deliver(incoming.RequestID, incoming.Content)
 			continue
@@ -357,7 +383,15 @@ func (c *WebSocketChannel) readPump(conn *websocket.Conn, clientID, chatID, clie
 			"client_type": clientType,
 			"sender_name": "",
 			"locale":      locale,
+ "generation": strconv.FormatInt(incoming.Generation, 10),
 		}
 		c.HandleMessage(senderID, chatID, content, media, metadata)
 	}
+}
+
+// gorilla/websocket requires one writer per connection.
+func (c *WebSocketChannel) writeMessage(conn *websocket.Conn, data []byte) error {
+ c.writeMu.Lock()
+ defer c.writeMu.Unlock()
+ return conn.WriteMessage(websocket.TextMessage, data)
 }

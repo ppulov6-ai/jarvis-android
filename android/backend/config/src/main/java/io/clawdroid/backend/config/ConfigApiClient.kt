@@ -1,5 +1,6 @@
 package io.clawdroid.backend.config
 
+import io.clawdroid.backend.api.SecretVault
 import io.clawdroid.backend.api.GatewaySettingsStore
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -18,6 +19,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import android.content.Context
 import java.io.Closeable
 import java.io.IOException
@@ -36,6 +39,7 @@ data class SchemaField(
     val depth: Int = 0,
     val type: String,
     val secret: Boolean = false,
+    val env: String = "",
     val default: JsonElement = Json.parseToJsonElement("null"),
 )
 
@@ -49,6 +53,8 @@ data class SaveConfigResult(
 class AuthException(message: String) : IOException(message)
 
 class ConfigApiClient(private val settingsStore: GatewaySettingsStore, private val context: Context) : Closeable {
+    private val vault = SecretVault(context)
+
     private val baseUrl: String
         get() = settingsStore.settings.value.httpBaseUrl
 
@@ -75,11 +81,32 @@ class ConfigApiClient(private val settingsStore: GatewaySettingsStore, private v
     }
 
     suspend fun saveConfig(config: JsonObject): SaveConfigResult {
-        return client.put("$baseUrl/api/config") {
+        val schema = getSchema()
+        val secrets = mutableMapOf<String, String>()
+        for (section in schema.sections) {
+            for (field in section.fields.filter { it.secret }) {
+                var value: JsonElement? = config
+                for (part in (section.key + "." + field.key).split(".")) {
+                    value = (value as? JsonObject)?.get(part)
+                }
+                val text = (value as? JsonPrimitive)?.contentOrNull ?: continue
+                if (text.isNotEmpty() && text.all { it == '*' || it == '•' }) continue
+                check(field.env.isNotEmpty()) { "Для секрета не настроено защищённое хранилище" }
+                secrets[field.env] = text
+            }
+        }
+        val previous = vault.environment()
+        vault.saveEnvironment(secrets)
+        return try {
+            client.put("$baseUrl/api/config") {
             contentType(ContentType.Application.Json)
             setBody(config)
             if (apiKey.isNotEmpty()) header("Authorization", "Bearer $apiKey")
-        }.ensureSuccess().body()
+            }.ensureSuccess().body<SaveConfigResult>()
+        } catch (error: Exception) {
+            vault.saveEnvironment(secrets.keys.associateWith { previous[it].orEmpty() })
+            throw error
+        }
     }
 
     override fun close() {

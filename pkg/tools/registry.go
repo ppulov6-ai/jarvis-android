@@ -57,7 +57,16 @@ func (r *ToolRegistry) ExecuteWithContext(ctx context.Context, name string, args
 		return ErrorResult(fmt.Sprintf("tool %q not found", name)).WithError(fmt.Errorf("tool not found"))
 	}
 
-	// If tool implements ContextualTool, set context
+	// Android execution uses its own copy: shared channel/chat state must never
+ // route a request from one concurrent session to another device.
+ if androidTool, ok := tool.(*AndroidTool); ok {
+  execution := *androidTool
+  execution.channel, execution.chatID = channel, chatID
+  execution.clientType, _ = ctx.Value(androidClientTypeKey{}).(string)
+  tool = &execution
+ }
+
+ // If tool implements ContextualTool, set context
 	if contextualTool, ok := tool.(ContextualTool); ok && channel != "" && chatID != "" {
 		contextualTool.SetContext(channel, chatID)
 	}

@@ -54,6 +54,7 @@ class VoiceModeManager(
     }
 
     fun stop() {
+        sendMessage.stop()
         loopJob?.cancel()
         loopJob = null
         parentScope = null
@@ -63,6 +64,7 @@ class VoiceModeManager(
     }
 
     fun interrupt() {
+        sendMessage.stop()
         val scope = parentScope ?: return
         if (loopJob?.isActive != true) return
 

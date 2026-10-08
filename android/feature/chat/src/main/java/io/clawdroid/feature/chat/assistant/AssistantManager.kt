@@ -97,6 +97,7 @@ class AssistantManager(
     }
 
     fun stop() {
+        connection.stop()
         loopJob?.cancel()
         loopJob = null
         parentScope = null
@@ -107,6 +108,7 @@ class AssistantManager(
     }
 
     fun interrupt() {
+        connection.stop()
         val scope = parentScope ?: return
         if (loopJob?.isActive != true) return
 

@@ -9,6 +9,11 @@ import io.clawdroid.core.data.remote.dto.WsIncoming
 import io.clawdroid.core.domain.model.AssistantMessage
 import io.clawdroid.core.domain.model.ConnectionState
 import io.clawdroid.core.domain.repository.AssistantConnection
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,6 +38,9 @@ class AssistantConnectionImpl(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val clientId = UUID.randomUUID().toString()
     private val wsClient = WebSocketClient(httpClient, scope, clientId, "assistant", context = context)
+    private val generation = AtomicLong(0)
+    private val toolJobs = ConcurrentHashMap<String, Job>()
+
     private val json = Json { ignoreUnknownKeys = true }
 
     private val _messages = MutableSharedFlow<AssistantMessage>(extraBufferCapacity = 64)
@@ -49,9 +57,15 @@ class AssistantConnectionImpl(
     init {
         scope.launch {
             wsClient.incomingMessages.collect { dto ->
+                if (generation.get() > 0L && dto.generation != generation.get() && dto.type != "setup_required") return@collect
                 when (dto.type) {
                     "status" -> _statusText.value = dto.content
+                    "cancelled" -> _statusText.value = null
                     "status_end" -> _statusText.value = null
+                    "tool_cancel" -> {
+                        val request = json.decodeFromString<ToolRequest>(dto.content)
+                        toolJobs.remove(request.requestId)?.cancel()
+                    }
                     "tool_request" -> handleToolRequest(dto.content)
                     "exit" -> onExit?.invoke(dto.content)
                     else -> {
@@ -63,9 +77,11 @@ class AssistantConnectionImpl(
     }
 
     private fun handleToolRequest(content: String) {
-        scope.launch {
+        val request = try { json.decodeFromString<ToolRequest>(content) } catch (e: Exception) { return }
+        if (request.generation != generation.get()) return
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                val request = json.decodeFromString<ToolRequest>(content)
+                if (request.generation != generation.get()) return@launch
                 val callback = onToolRequest
                 val resultContent = if (callback != null) {
                     callback(request)
@@ -76,13 +92,20 @@ class AssistantConnectionImpl(
                 val response = WsIncoming(
                     content = resultContent,
                     type = "tool_response",
-                    requestId = request.requestId
+                    requestId = request.requestId,
+                    generation = request.generation
                 )
-                wsClient.send(response)
+                if (request.generation == generation.get()) wsClient.send(response)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to handle tool request", e)
+            } finally {
+                toolJobs.remove(request.requestId)
             }
         }
+        toolJobs[request.requestId] = job
+        if (request.generation != generation.get()) job.cancel() else job.start()
     }
 
     override fun connect(wsUrl: String) {
@@ -90,13 +113,25 @@ class AssistantConnectionImpl(
         wsClient.connect()
     }
 
+    override fun stop() {
+        val next = generation.incrementAndGet()
+        toolJobs.values.forEach { it.cancel() }
+        toolJobs.clear()
+        _statusText.value = null
+        scope.launch { wsClient.send(WsIncoming(content = "", type = "cancel", generation = next)) }
+    }
+
     override fun disconnect() {
+        stop()
         wsClient.disconnect()
         scope.cancel()
     }
 
     override suspend fun send(text: String, images: List<String>, inputMode: String) {
+        toolJobs.values.forEach { it.cancel() }
+        val next = generation.incrementAndGet()
         val dto = WsIncoming(
+            generation = next,
             content = text,
             images = images.ifEmpty { null },
             inputMode = inputMode

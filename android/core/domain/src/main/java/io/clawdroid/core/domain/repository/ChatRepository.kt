@@ -12,5 +12,6 @@ interface ChatRepository {
     suspend fun sendMessage(text: String, images: List<ImageAttachment> = emptyList(), inputMode: String? = null)
     fun loadMore()
     fun connect()
+    fun stop() {}
     fun disconnect()
 }

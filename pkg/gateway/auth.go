@@ -3,6 +3,7 @@ package gateway
 import (
 	"crypto/subtle"
 	"net/http"
+ "os"
 	"strings"
 )
 
@@ -12,6 +13,10 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		apiKey := s.cfg.Gateway.APIKey
 		if apiKey == "" {
+            if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
+                writeJSONError(w, http.StatusUnauthorized, "gateway authentication is not configured")
+                return
+            }
 			next(w, r)
 			return
 		}

@@ -2,6 +2,7 @@ package io.clawdroid.backend.loader
 
 import android.content.Context
 import android.util.Log
+import io.clawdroid.backend.api.SecretVault
 import io.clawdroid.backend.api.BackendState
 import io.clawdroid.backend.api.GatewaySettingsStore
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +21,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.BufferedReader
+import java.io.File
+import kotlinx.coroutines.flow.first
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -44,6 +47,8 @@ class GatewayProcessManager(
 
     suspend fun start() {
         mutex.withLock {
+            settingsStore.awaitLoaded()
+            SecretVault(context).migrateLegacyConfig(File(context.filesDir, ".clawdroid/config.json"))
             ensureApiKey()
             startProcess()
             startSettingsObserver()
@@ -61,7 +66,10 @@ class GatewayProcessManager(
     private suspend fun ensureApiKey() {
         val settings = settingsStore.settings.value
         if (settings.apiKey.isEmpty()) {
-            settingsStore.update(settings.copy(apiKey = UUID.randomUUID().toString()))
+            val key = SecretVault(context).environment()["CLAWDROID_GATEWAY_API_KEY"]
+                ?: UUID.randomUUID().toString()
+            settingsStore.update(settings.copy(apiKey = key))
+            settingsStore.settings.first { it.apiKey == key }
         }
     }
 
@@ -82,7 +90,9 @@ class GatewayProcessManager(
         )
 
         val pb = ProcessBuilder(binaryPath, "gateway", "run")
+        pb.environment().putAll(SecretVault(context).environment())
         pb.environment().putAll(env)
+        pb.environment()["CLAWDROID_ANDROID_SECURE_SECRETS"] = "true"
         pb.directory(context.filesDir)
         pb.redirectErrorStream(true)
 
@@ -146,7 +156,7 @@ class GatewayProcessManager(
         try {
             proc.inputStream.bufferedReader().use { reader: BufferedReader ->
                 reader.forEachLine { line ->
-                    Log.i(TAG, line)
+                    // Do not copy backend payloads or credentials into Android logcat.
                 }
             }
         } catch (_: java.io.InterruptedIOException) {
@@ -163,6 +173,7 @@ class GatewayProcessManager(
                 val conn = URL(url).openConnection() as HttpURLConnection
                 conn.connectTimeout = 1000
                 conn.readTimeout = 1000
+                conn.setRequestProperty("Authorization", "Bearer ${settingsStore.settings.value.apiKey}")
                 try {
                     if (conn.responseCode == 200) {
                         if (_state.value == BackendState.STARTING) {

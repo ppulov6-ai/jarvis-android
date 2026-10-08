@@ -14,6 +14,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import io.clawdroid.core.data.remote.dto.ToolRequest
 import io.clawdroid.core.data.remote.dto.ToolResponse
 import io.clawdroid.feature.chat.voice.ScreenshotSource
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -32,7 +36,8 @@ class ToolRequestHandler(
     private val deviceController: DeviceController,
     private val screenshotSource: ScreenshotSource,
     private val setOverlayVisibility: (Boolean) -> Unit,
-    private val onAccessibilityNeeded: () -> Unit
+    private val onAccessibilityNeeded: () -> Unit,
+    private val onStop: () -> Unit = {}
 ) {
 
     private val actionHandlers: List<ActionHandler> = listOf(
@@ -56,6 +61,17 @@ class ToolRequestHandler(
 
     suspend fun handle(request: ToolRequest): ToolResponse {
         return try {
+            currentCoroutineContext().ensureActive()
+            if (ActionSafetyPolicy.requiresConfirmation(request.action)) {
+                val approved = try {
+                    withContext(Dispatchers.Main) { setOverlayVisibility(false) }
+                    ActionConfirmation.ask(context, request, onStop)
+                } finally {
+                    withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
+                }
+                currentCoroutineContext().ensureActive()
+                if (!approved) return ToolResponse(request.requestId, false, error = "Действие отменено: подтверждение не получено")
+            }
             when (request.action) {
                 // Core actions handled directly
                 "search_apps" -> handleSearchApps(request)
@@ -78,15 +94,18 @@ class ToolRequestHandler(
                             error = "Unknown action: ${request.action}"
                         )
                     ensurePermissions(request, handler)?.let { return it }
+                    currentCoroutineContext().ensureActive()
                     handler.handle(request, context)
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Error handling tool request: ${request.action}", e)
+            Log.e(TAG, "Ошибка выполнения действия")
             ToolResponse(
                 requestId = request.requestId,
                 success = false,
-                error = "Error: ${e.message}"
+                error = "Не удалось выполнить действие"
             )
         }
     }
@@ -145,7 +164,7 @@ class ToolRequestHandler(
             delay(150)
             block()
         } finally {
-            withContext(Dispatchers.Main) { setOverlayVisibility(true) }
+            withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
         }
     }
 
@@ -250,8 +269,8 @@ class ToolRequestHandler(
         val index = request.params?.get("index")?.jsonPrimitive?.intOrNull ?: 0
         val boundsX = request.params?.get("bounds_x")?.jsonPrimitive?.doubleOrNull
         val boundsY = request.params?.get("bounds_y")?.jsonPrimitive?.doubleOrNull
-        val maxDepth = request.params?.get("max_depth")?.jsonPrimitive?.intOrNull ?: 15
-        val maxNodes = request.params?.get("max_nodes")?.jsonPrimitive?.intOrNull ?: 300
+        val maxDepth = request.params?.get("max_depth")?.jsonPrimitive?.intOrNull?.coerceIn(0, 20) ?: 15
+        val maxNodes = request.params?.get("max_nodes")?.jsonPrimitive?.intOrNull?.coerceIn(1, 300) ?: 300
 
         return withOverlayHidden {
             val root = deviceController.getRootNode()
@@ -327,8 +346,12 @@ class ToolRequestHandler(
         sb.append("${indent}[${shortClass}]")
 
         // Only output non-empty fields
-        node.text?.takeIf { it.isNotEmpty() }?.let { sb.append(" text=$it") }
-        node.contentDescription?.takeIf { it.isNotEmpty() }?.let { sb.append(" desc=$it") }
+        if (node.isPassword) {
+            sb.append(" [защищённое поле]")
+        } else {
+            node.text?.takeIf { it.isNotEmpty() }?.let { sb.append(" text=${it.take(1000)}") }
+            node.contentDescription?.takeIf { it.isNotEmpty() }?.let { sb.append(" desc=${it.take(1000)}") }
+        }
         sb.append(" bounds=$bounds")
         // Only output non-default values: clickable=true (default is false), enabled=false (default is true)
         if (node.isClickable) sb.append(" clickable")

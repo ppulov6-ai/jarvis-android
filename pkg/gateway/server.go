@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+ "os"
 
 	"github.com/KarakuriAgent/clawdroid/pkg/config"
 	"github.com/KarakuriAgent/clawdroid/pkg/logger"
@@ -32,7 +33,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/config/schema", s.authMiddleware(s.handleGetSchema))
 	mux.HandleFunc("GET /api/config", s.authMiddleware(s.handleGetConfig))
 	mux.HandleFunc("PUT /api/config", s.authMiddleware(s.handlePutConfig))
-	mux.HandleFunc("POST /api/setup/init", s.handleSetupInit)
+	if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
+        mux.HandleFunc("POST /api/setup/init", s.authMiddleware(s.handleSetupInit))
+    } else {
+        mux.HandleFunc("POST /api/setup/init", s.handleSetupInit)
+    }
 	mux.HandleFunc("PUT /api/setup/complete", s.authMiddleware(s.handleSetupComplete))
 
 	addr := fmt.Sprintf("127.0.0.1:%d", s.cfg.Gateway.Port)

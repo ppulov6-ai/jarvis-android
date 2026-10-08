@@ -11,6 +11,7 @@ interface AssistantConnection {
     val connectionState: StateFlow<ConnectionState>
 
     fun connect(wsUrl: String)
+    fun stop() {}
     fun disconnect()
     suspend fun send(text: String, images: List<String> = emptyList(), inputMode: String = "assistant")
 }

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+ "reflect"
+ "strings"
 	"sync"
 
 	"github.com/caarlos0/env/v11"
@@ -463,6 +465,7 @@ func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+            if err := env.Parse(cfg); err != nil { return nil, err }
 			return cfg, nil
 		}
 		return nil, err
@@ -498,6 +501,17 @@ func SaveConfigLocked(path string, cfg *Config) error {
 
 func saveConfigLocked(path string, cfg *Config) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
+ if err == nil && os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" {
+  for _, server := range cfg.Tools.MCP {
+            if len(server.Env) > 0 || len(server.Headers) > 0 {
+                return fmt.Errorf("В первой версии Android секреты MCP в env и headers не поддерживаются. Уберите их перед сохранением")
+            }
+        }
+        var disk map[string]interface{}
+  if err = json.Unmarshal(data, &disk); err != nil { return err }
+  stripPersistentSecrets(disk)
+  data, err = json.MarshalIndent(disk, "", "  ")
+ }
 	if err != nil {
 		return err
 	}
@@ -507,7 +521,9 @@ func saveConfigLocked(path string, cfg *Config) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	if err := os.WriteFile(path, data, 0600); err != nil { return err }
+ if os.Getenv("CLAWDROID_ANDROID_SECURE_SECRETS") == "true" { syncSecretEnvironment(reflect.ValueOf(cfg).Elem()) }
+ return nil
 }
 
 func (c *Config) Lock()    { c.mu.Lock() }
@@ -587,4 +603,35 @@ func expandHome(path string) string {
 		return home
 	}
 	return path
+}
+
+// IsSecretKey is shared with the configuration schema and Android secure persistence.
+func IsSecretKey(key string) bool {
+ switch key { case "api_key", "token", "bot_token", "app_token", "channel_secret", "channel_access_token", "password", "secret", "authorization": return true }
+ return false
+}
+
+func stripPersistentSecrets(node interface{}) {
+ switch v := node.(type) {
+ case map[string]interface{}:
+  for key, child := range v {
+   if IsSecretKey(strings.ToLower(key)) { v[key] = "" } else { stripPersistentSecrets(child) }
+  }
+ case []interface{}: for _, child := range v { stripPersistentSecrets(child) }
+ }
+}
+
+// Keep credentials in process memory across a configuration-triggered restart.
+func syncSecretEnvironment(v reflect.Value) {
+ t := v.Type()
+ for i:=0; i<v.NumField(); i++ {
+  f := t.Field(i)
+  if !f.IsExported() { continue }
+  value := v.Field(i)
+  if value.Kind()==reflect.Struct { syncSecretEnvironment(value); continue }
+  key := strings.Split(f.Tag.Get("json"), ",")[0]
+  if IsSecretKey(key) && value.Kind()==reflect.String {
+   if name:=f.Tag.Get("env"); name!="" { _ = os.Setenv(name,value.String()) }
+  }
+ }
 }

@@ -68,6 +68,10 @@ class ChatViewModel(
             is ChatEvent.OnInputChanged -> {
                 _uiState.update { it.copy(inputText = event.text) }
             }
+            is ChatEvent.OnStopClick -> {
+                voiceModeManager.stop()
+                _uiState.update { it.copy(statusLabel = null) }
+            }
             is ChatEvent.OnSendClick -> {
                 val state = _uiState.value
                 val text = state.inputText.trim()

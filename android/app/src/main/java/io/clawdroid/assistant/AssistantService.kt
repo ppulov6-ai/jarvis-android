@@ -122,14 +122,15 @@ class AssistantService : LifecycleService(), SavedStateRegistryOwner {
             deviceController = deviceController,
             screenshotSource = screenshotSource,
             setOverlayVisibility = { visible -> setOverlayVisible(visible) },
-            onAccessibilityNeeded = { showAccessibilityGuide = true }
+            onAccessibilityNeeded = { showAccessibilityGuide = true },
+            onStop = { shutdown() }
         )
         (connection as AssistantConnectionImpl).onToolRequest = { request ->
             val response = toolRequestHandler.handle(request)
             if (response.success) {
                 response.result ?: ""
             } else {
-                response.error ?: "unknown error"
+                "error: ${response.error ?: "Неизвестная ошибка"}"
             }
         }
         (connection as AssistantConnectionImpl).onExit = { farewell ->

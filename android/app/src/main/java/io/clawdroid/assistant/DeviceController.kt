@@ -69,6 +69,7 @@ class DeviceController {
                 if (root.packageName?.toString() == ownPackage) return@firstNotNullOfOrNull null
                 root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             } ?: return false
+        if (focusedNode.isPassword) return false
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }

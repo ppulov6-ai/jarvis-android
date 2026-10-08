@@ -95,11 +95,12 @@ val appModule = module {
             deviceController = get(),
             screenshotSource = get(),
             setOverlayVisibility = {},
-            onAccessibilityNeeded = {}
+            onAccessibilityNeeded = {},
+            onStop = { repo.stop() }
         )
         repo.onToolRequest = { request ->
             val response = handler.handle(request)
-            if (response.success) response.result ?: "" else response.error ?: "unknown error"
+            if (response.success) response.result ?: "" else "error: ${response.error ?: "Неизвестная ошибка"}"
         }
         repo
     }
@@ -131,7 +132,7 @@ val appModule = module {
     single { VoiceModeManager(get(), get(), get(), get(), get(), get()) }
 
     // Setup
-    single { SetupApiClient(get()) }
+    single { SetupApiClient(get(), androidContext()) }
 
     // ViewModel
     viewModel { ChatViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }

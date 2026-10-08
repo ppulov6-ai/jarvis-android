@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class WsIncoming(
+    val generation: Long = 0,
     val content: String,
     @SerialName("sender_id") val senderId: String? = null,
     val images: List<String>? = null,

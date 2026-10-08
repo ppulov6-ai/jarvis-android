@@ -22,7 +22,7 @@ class AgentMessageReceiver : BroadcastReceiver(), KoinComponent {
     override fun onReceive(context: Context, intent: Intent) {
         val messageJson = intent.getStringExtra("message") ?: return
 
-        Log.d(TAG, "Received broadcast message: ${messageJson.take(100)}")
+        // Message contents may contain private data; never log the payload.
 
         val pendingResult = goAsync()
 
@@ -50,7 +50,7 @@ class AgentMessageReceiver : BroadcastReceiver(), KoinComponent {
             // Show notification (synchronous, safe to call here)
             NotificationHelper.showMessageNotification(context, msg.content)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to process broadcast message", e)
+            Log.e(TAG, "Не удалось обработать сообщение")
             pendingResult.finish()
         }
     }

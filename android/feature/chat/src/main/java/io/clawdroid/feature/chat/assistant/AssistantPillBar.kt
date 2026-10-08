@@ -304,7 +304,7 @@ fun AssistantPillBar(
                                 if (isAtTop) LucideR.drawable.lucide_ic_chevron_down
                                 else LucideR.drawable.lucide_ic_chevron_up
                             ),
-                            contentDescription = if (isAtTop) "Move to bottom" else "Move to top",
+                            contentDescription = if (isAtTop) "Переместить вниз" else "Переместить вверх",
                             modifier = Modifier.size(18.dp),
                             tint = TextSecondary
                         )
@@ -315,12 +315,7 @@ fun AssistantPillBar(
                         onClick = onClose,
                         modifier = Modifier.size(36.dp)
                     ) {
-                        Icon(
-                            painter = painterResource(LucideR.drawable.lucide_ic_x),
-                            contentDescription = "Close",
-                            modifier = Modifier.size(18.dp),
-                            tint = TextSecondary
-                        )
+                        Text("Стоп", color = TextSecondary)
                     }
                 }
             }

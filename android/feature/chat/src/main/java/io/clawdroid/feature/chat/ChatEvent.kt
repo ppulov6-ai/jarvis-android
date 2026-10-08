@@ -4,6 +4,7 @@ import io.clawdroid.core.domain.model.ImageAttachment
 
 sealed interface ChatEvent {
     data class OnInputChanged(val text: String) : ChatEvent
+    data object OnStopClick : ChatEvent
     data object OnSendClick : ChatEvent
     data class OnImageAdded(val image: ImageAttachment) : ChatEvent
     data class OnImageRemoved(val index: Int) : ChatEvent

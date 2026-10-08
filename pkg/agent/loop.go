@@ -63,6 +63,7 @@ type AgentLoop struct {
 type activeProcess struct {
 	cancel context.CancelFunc
 	done   chan struct{}
+ generation int64
 }
 
 // processOptions configures how a message is processed
@@ -269,6 +270,11 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 
 func (al *AgentLoop) Run(ctx context.Context) error {
 	al.running.Store(true)
+ al.bus.SetCancelHandler(func(session string, generation int64) {
+ al.procsMu.Lock()
+ defer al.procsMu.Unlock()
+ if active := al.activeProcs[session]; active != nil && active.generation <= generation { active.cancel() }
+ })
 
 	for al.running.Load() {
 		select {
@@ -285,6 +291,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				sessionKey = fmt.Sprintf("%s:%s", msg.Channel, msg.ChatID)
 			}
 
+			if !al.bus.IsCurrent(msg.Channel+":"+msg.ChatID, msg.Generation) { continue }
 			al.procsMu.Lock()
 			if active, exists := al.activeProcs[sessionKey]; exists {
 				if al.queueMessages {
@@ -310,16 +317,20 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				}
 			}
 
-			procCtx, procCancel := context.WithCancel(ctx)
+			if !al.bus.IsCurrent(msg.Channel+":"+msg.ChatID, msg.Generation) {
+ al.procsMu.Unlock()
+ continue
+ }
+ procCtx, procCancel := context.WithCancel(bus.WithGeneration(ctx, msg.Generation))
 			done := make(chan struct{})
-			al.activeProcs[sessionKey] = &activeProcess{cancel: procCancel, done: done}
+			al.activeProcs[sessionKey] = &activeProcess{cancel: procCancel, done: done, generation: msg.Generation}
 			al.procsMu.Unlock()
 
 			go func(m bus.InboundMessage, sk string) {
 				defer func() {
 					// Clear status indicator on completion (normal, error, or cancel)
 					if !constants.IsInternalChannel(m.Channel) {
-						al.bus.PublishOutbound(bus.OutboundMessage{
+						al.bus.PublishOutboundContext(procCtx, bus.OutboundMessage{
 							Channel: m.Channel, ChatID: m.ChatID,
 							Type: "status_end",
 						})
@@ -340,7 +351,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				}
 				if err != nil {
 					if al.showErrors {
-						al.bus.PublishOutbound(bus.OutboundMessage{
+						al.bus.PublishOutboundContext(procCtx, bus.OutboundMessage{
 							Channel: m.Channel, ChatID: m.ChatID,
 							Content: fmt.Sprintf("Error: %v", err), Type: "error",
 						})
@@ -348,7 +359,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					return
 				}
 				if response != "" {
-					al.bus.PublishOutbound(bus.OutboundMessage{
+					al.bus.PublishOutboundContext(procCtx, bus.OutboundMessage{
 						Channel: m.Channel, ChatID: m.ChatID, Content: response,
 					})
 				}
@@ -361,6 +372,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
+ al.procsMu.Lock()
+ for _, active := range al.activeProcs { active.cancel() }
+ al.procsMu.Unlock()
 	if al.mcpManager != nil {
 		al.mcpManager.Stop()
 	}
@@ -485,7 +499,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	// Send migration notice once on first message
 	al.migrationOnce.Do(func() {
 		if al.userStore != nil && al.userStore.NeedsMigration() {
-			al.bus.PublishOutbound(bus.OutboundMessage{
+			al.bus.PublishOutboundContext(ctx, bus.OutboundMessage{
 				Channel: msg.Channel,
 				ChatID:  msg.ChatID,
 				Content: i18n.T(locale, "agent.migration_notice"),
@@ -648,7 +662,7 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 	// 4. Emit thinking status
 	thinkingLabel := i18n.T(locale, "status.thinking")
 	if !constants.IsInternalChannel(opts.Channel) {
-		al.bus.PublishOutbound(bus.OutboundMessage{
+		al.bus.PublishOutboundContext(ctx, bus.OutboundMessage{
 			Channel: opts.Channel,
 			ChatID:  opts.ChatID,
 			Content: thinkingLabel,
@@ -672,7 +686,7 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 					return
 				case <-ticker.C:
 					if status, ok := currentStatus.Load().(string); ok && status != "" {
-						al.bus.PublishOutbound(bus.OutboundMessage{
+						al.bus.PublishOutboundContext(ctx, bus.OutboundMessage{
 							Channel: opts.Channel,
 							ChatID:  opts.ChatID,
 							Content: status,
@@ -704,7 +718,7 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 		al.sessions.AddMessage(opts.SessionKey, "assistant", "[silent]")
 		_ = al.sessions.Save(opts.SessionKey)
 		if opts.EnableSummary {
-			al.maybeSummarize(opts.SessionKey, opts.Channel, opts.ChatID, locale)
+			al.maybeSummarize(ctx, opts.SessionKey, opts.Channel, opts.ChatID, locale)
 		}
 		return "", nil
 	}
@@ -720,12 +734,12 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 
 	// 7. Optional: summarization
 	if opts.EnableSummary {
-		al.maybeSummarize(opts.SessionKey, opts.Channel, opts.ChatID, locale)
+		al.maybeSummarize(ctx, opts.SessionKey, opts.Channel, opts.ChatID, locale)
 	}
 
 	// 8. Optional: send response via bus
 	if opts.SendResponse {
-		al.bus.PublishOutbound(bus.OutboundMessage{
+		al.bus.PublishOutboundContext(ctx, bus.OutboundMessage{
 			Channel: opts.Channel,
 			ChatID:  opts.ChatID,
 			Content: finalContent,
@@ -836,7 +850,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 
 				// Notify user on first retry only
 				if retry == 0 && !constants.IsInternalChannel(opts.Channel) && opts.SendResponse && al.showWarnings {
-					al.bus.PublishOutbound(bus.OutboundMessage{
+					al.bus.PublishOutboundContext(ctx, bus.OutboundMessage{
 						Channel: opts.Channel,
 						ChatID:  opts.ChatID,
 						Content: i18n.T(locale, "agent.context_window_warning"),
@@ -974,7 +988,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 			if !constants.IsInternalChannel(opts.Channel) {
 				if label := statusLabel(tc.Name, tc.Arguments, locale); label != "" {
 					currentStatus.Store(label)
-					al.bus.PublishOutbound(bus.OutboundMessage{
+					al.bus.PublishOutboundContext(ctx, bus.OutboundMessage{
 						Channel: opts.Channel,
 						ChatID:  opts.ChatID,
 						Content: label,
@@ -983,11 +997,12 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 				}
 			}
 
-			toolResult := al.tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
+			if ctx.Err() != nil { return "", iteration, ctx.Err() }
+			toolResult := al.tools.ExecuteWithContext(tools.WithAndroidClientType(ctx, opts.Metadata["client_type"]), tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
 
 			// Send ForUser content to user immediately if not Silent
 			if !toolResult.Silent && toolResult.ForUser != "" && opts.SendResponse {
-				al.bus.PublishOutbound(bus.OutboundMessage{
+				al.bus.PublishOutboundContext(ctx, bus.OutboundMessage{
 					Channel: opts.Channel,
 					ChatID:  opts.ChatID,
 					Content: toolResult.ForUser,
@@ -1054,18 +1069,6 @@ func (al *AgentLoop) updateToolContexts(channel, chatID string, metadata map[str
 			st.SetContext(channel, chatID)
 		}
 	}
-	if tool, ok := al.tools.Get("android"); ok {
-		if ct, ok := tool.(tools.ContextualTool); ok {
-			ct.SetContext(channel, chatID)
-		}
-		if at, ok := tool.(*tools.AndroidTool); ok {
-			if metadata != nil {
-				at.SetClientType(metadata["client_type"])
-			} else {
-				at.SetClientType("")
-			}
-		}
-	}
 	if tool, ok := al.tools.Get("exit"); ok {
 		if et, ok := tool.(*tools.ExitTool); ok {
 			et.SetContext(channel, chatID)
@@ -1079,7 +1082,7 @@ func (al *AgentLoop) updateToolContexts(channel, chatID string, metadata map[str
 }
 
 // maybeSummarize triggers summarization if the session history exceeds thresholds.
-func (al *AgentLoop) maybeSummarize(sessionKey, channel, chatID, locale string) {
+func (al *AgentLoop) maybeSummarize(ctx context.Context, sessionKey, channel, chatID, locale string) {
 	newHistory := al.sessions.GetHistory(sessionKey)
 	tokenEstimate := al.estimateTokens(newHistory)
 	threshold := al.contextWindow * 75 / 100
@@ -1090,7 +1093,7 @@ func (al *AgentLoop) maybeSummarize(sessionKey, channel, chatID, locale string) 
 				defer al.summarizing.Delete(sessionKey)
 				// Notify user about optimization if not an internal channel
 				if !constants.IsInternalChannel(channel) && al.showWarnings {
-					al.bus.PublishOutbound(bus.OutboundMessage{
+					al.bus.PublishOutboundContext(ctx, bus.OutboundMessage{
 						Channel: channel,
 						ChatID:  chatID,
 						Content: i18n.T(locale, "agent.memory_threshold_warning"),

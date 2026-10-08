@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class ToolRequest(
+    val generation: Long = 0,
     @SerialName("request_id") val requestId: String,
     val action: String,
     val params: JsonObject? = null

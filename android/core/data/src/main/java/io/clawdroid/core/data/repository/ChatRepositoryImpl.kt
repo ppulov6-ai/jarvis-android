@@ -12,6 +12,11 @@ import io.clawdroid.core.domain.model.ConnectionState
 import io.clawdroid.core.domain.model.ImageAttachment
 import io.clawdroid.core.domain.model.MessageStatus
 import io.clawdroid.core.domain.repository.ChatRepository
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,6 +35,9 @@ class ChatRepositoryImpl(
     private val scope: CoroutineScope,
     private val imageFileStorage: ImageFileStorage
 ) : ChatRepository {
+
+    private val generation = AtomicLong(0)
+    private val toolJobs = ConcurrentHashMap<String, Job>()
 
     private val json = Json { ignoreUnknownKeys = true }
     var onToolRequest: (suspend (ToolRequest) -> String)? = null
@@ -52,9 +60,15 @@ class ChatRepositoryImpl(
     init {
         scope.launch {
             webSocketClient.incomingMessages.collect { dto ->
+                if (generation.get() > 0L && dto.generation != generation.get() && dto.type != "setup_required") return@collect
                 when (dto.type) {
                     "status" -> _statusLabel.value = dto.content
+                    "cancelled" -> _statusLabel.value = null
                     "status_end" -> _statusLabel.value = null
+                    "tool_cancel" -> {
+                        val request = json.decodeFromString<ToolRequest>(dto.content)
+                        toolJobs.remove(request.requestId)?.cancel()
+                    }
                     "tool_request" -> handleToolRequest(dto.content)
                     "exit", "setup_required" -> { /* ignored in chat mode */ }
                     else -> {
@@ -71,7 +85,9 @@ class ChatRepositoryImpl(
         val results = images.map { imageFileStorage.saveFromUri(it.uri) }
         val entity = MessageMapper.toEntity(text, results.map { it.imageData }, MessageStatus.SENDING)
         messageDao.insert(entity)
-        val wsDto = MessageMapper.toWsIncoming(text, results.map { it.base64 }, inputMode)
+        toolJobs.values.forEach { it.cancel() }
+        val next = generation.incrementAndGet()
+        val wsDto = MessageMapper.toWsIncoming(text, results.map { it.base64 }, inputMode).copy(generation = next)
         val success = webSocketClient.send(wsDto)
         messageDao.update(entity.copy(status = if (success) MessageStatus.SENT.name else MessageStatus.FAILED.name))
     }
@@ -84,14 +100,25 @@ class ChatRepositoryImpl(
         webSocketClient.connect()
     }
 
+    override fun stop() {
+        val next = generation.incrementAndGet()
+        toolJobs.values.forEach { it.cancel() }
+        toolJobs.clear()
+        _statusLabel.value = null
+        scope.launch { webSocketClient.send(WsIncoming(content = "", type = "cancel", generation = next)) }
+    }
+
     override fun disconnect() {
+        stop()
         webSocketClient.disconnect()
     }
 
     private fun handleToolRequest(content: String) {
-        scope.launch {
+        val request = try { json.decodeFromString<ToolRequest>(content) } catch (e: Exception) { return }
+        if (request.generation != generation.get()) return
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                val request = json.decodeFromString<ToolRequest>(content)
+                if (request.generation != generation.get()) return@launch
                 val callback = onToolRequest
                 val resultContent = if (callback != null) {
                     callback(request)
@@ -101,13 +128,20 @@ class ChatRepositoryImpl(
                 val response = WsIncoming(
                     content = resultContent,
                     type = "tool_response",
-                    requestId = request.requestId
+                    requestId = request.requestId,
+                    generation = request.generation
                 )
-                webSocketClient.send(response)
+                if (request.generation == generation.get()) webSocketClient.send(response)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to handle tool request", e)
+            } finally {
+                toolJobs.remove(request.requestId)
             }
         }
+        toolJobs[request.requestId] = job
+        if (request.generation != generation.get()) job.cancel() else job.start()
     }
 
     companion object {
