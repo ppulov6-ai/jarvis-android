@@ -15,6 +15,7 @@ import java.util.Locale;
 public final class MainActivity extends Activity {
  static final String APK_SHA="cf31e3dc73b6b5965cc39441a8b937a4a9a59ef8b9fa7b938402a65e6aa3f30f";
  static volatile Intent pending;
+ static volatile boolean preparing;
  static WeakReference<MainActivity> visible=new WeakReference<>(null);
  android.content.SharedPreferences prefs;
  TextView statusView;
@@ -26,6 +27,7 @@ public final class MainActivity extends Activity {
  public void onCreate(Bundle b){
   super.onCreate(b);
   prefs=getSharedPreferences("diagnostic",0);
+  if(prefs.getBoolean("busy",false)&&!preparing)prefs.edit().putBoolean("busy",false).putInt("status",-98).putString("message","Предыдущая подготовка прервана. Повторите установку.").commit();
   LinearLayout content=new LinearLayout(this);
   content.setOrientation(1);content.setPadding(28,36,28,24);content.setBackgroundColor(Color.rgb(250,247,238));
   TextView title=new TextView(this);title.setText("Проверка установки Джарвиса");title.setTextSize(24);title.setTextColor(Color.rgb(16,63,38));content.addView(title);
@@ -71,6 +73,7 @@ public final class MainActivity extends Activity {
    prefs.edit().putString("message","Разрешите установку из этого приложения, вернитесь сюда и нажмите кнопку установки ещё раз.").apply();refresh();
    startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+getPackageName())));return;
   }
+  pending=null;preparing=true;
   prefs.edit().putBoolean("busy",true).putInt("status",-97).putString("message","Проверка файла и подготовка установки").commit();refresh();
   new Thread(()->{
    File apk=new File(getCacheDir(),"jarvis.apk");int sessionId=-1;
@@ -99,7 +102,7 @@ public final class MainActivity extends Activity {
    }catch(Exception e){
     if(sessionId>=0)try{getPackageManager().getPackageInstaller().abandonSession(sessionId);}catch(Exception ignored){}
     failure(e);
-   }finally{apk.delete();}
+   }finally{preparing=false;apk.delete();}
   },"apk-install-check").start();
  }
 }
