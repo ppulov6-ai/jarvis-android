@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="ru.pulat.jarvis.installcheck">
+ <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="36"/>
+ <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+ <application android:label="Проверка установки Джарвиса" android:icon="@android:drawable/ic_menu_info_details" android:allowBackup="false" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+  <activity android:name=".MainActivity" android:exported="true">
+   <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+  </activity>
+  <receiver android:name=".InstallResult" android:exported="false"/>
+ </application>
+</manifest>
