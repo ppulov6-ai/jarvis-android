@@ -31,6 +31,11 @@ jobs:
           text = exporter.read_text()
           assert text.count(before) == 1
           exporter.write_text(text.replace(before, after))
+          handler = Path('android/app/src/main/java/io/clawdroid/assistant/ToolRequestHandler.kt')
+          redundant = '    init { io.clawdroid.diagnostics.DiagnosticEvents.initialize(context) }\n\n'
+          text = handler.read_text()
+          assert text.count(redundant) == 1
+          handler.write_text(text.replace(redundant, ''))
           PYCODE
       - uses: actions/setup-go@v5
         with:
