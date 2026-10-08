@@ -36,25 +36,7 @@ jobs:
           disk-size: 8G
           disable-animations: true
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
-          script: |
-            adb shell getprop ro.build.version.sdk
-            adb shell getprop ro.product.cpu.abilist
-            for pass in 1 2; do
-              adb uninstall ru.pulat.jarvis || true
-              adb install --no-streaming old.apk | tee evidence/old-clean-$pass.txt
-              adb shell pm path ru.pulat.jarvis | tee evidence/old-path-$pass.txt
-              grep -q Success evidence/old-clean-$pass.txt
-              adb uninstall ru.pulat.jarvis
-              adb install --no-streaming new.apk | tee evidence/new-clean-$pass.txt
-              adb shell pm path ru.pulat.jarvis | tee evidence/new-path-$pass.txt
-              grep -q Success evidence/new-clean-$pass.txt
-              adb uninstall ru.pulat.jarvis
-            done
-            adb install --no-streaming old.apk
-            adb install --no-streaming -r new.apk > evidence/update.txt 2>&1 || true
-            cat evidence/update.txt
-            grep -q INSTALL_FAILED_UPDATE_INCOMPATIBLE evidence/update.txt
-            adb logcat -d -v threadtime > evidence/logcat.txt
+          script: bash scripts/apk-install-check.sh
       - name: Сохранить доказательства
         if: always()
         uses: actions/upload-artifact@v4
