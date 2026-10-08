@@ -51,6 +51,20 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew clean :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --stacktrace
+      - name: Прочитать результаты тестов
+        if: always()
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for report in Path('android').glob('**/build/test-results/**/*.xml'):
+              root = ET.parse(report).getroot()
+              for case in root.iter('testcase'):
+                  for failure in case.findall('failure') + case.findall('error'):
+                      print('TEST FAILURE:', case.get('classname'), case.get('name'))
+                      print(failure.get('message'))
+                      print((failure.text or '')[:7000])
+          PYCODE
       - name: Android проверки из чистого состояния 2
         working-directory: android
         run: |
