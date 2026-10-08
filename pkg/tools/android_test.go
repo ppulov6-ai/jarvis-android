@@ -522,7 +522,7 @@ func TestAndroidRegistryKeepsSessionContextIsolated(t *testing.T) {
   wg.Add(1)
   go func(chatID string) {
    defer wg.Done()
-   result := registry.ExecuteWithContext(WithAndroidClientType(context.Background(), "assistant"), "android", map[string]interface{}{"action": "search_apps"}, "websocket", chatID, nil)
+   result := registry.ExecuteWithContext(WithAndroidClientType(context.Background(), "assistant"), "android", map[string]interface{}{"action": "search_apps", "query": "clock"}, "websocket", chatID, nil)
    if result.IsError { t.Errorf("session %s: %s", chatID, result.ForLLM) }
   }(session)
  }
