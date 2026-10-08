@@ -55,7 +55,7 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew clean :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --stacktrace
+          ./gradlew clean :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --no-build-cache --rerun-tasks --stacktrace
       - name: Прочитать результаты тестов
         if: always()
         run: |
@@ -73,7 +73,7 @@ jobs:
       - name: Android проверки из чистого состояния 2
         working-directory: android
         run: |
-          ./gradlew clean :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --stacktrace
+          ./gradlew clean :backend:api:testDebugUnitTest :backend:config:testDebugUnitTest :core:data:testDebugUnitTest :feature:chat:testDebugUnitTest :app:testEmbeddedDebugUnitTest :app:assembleEmbeddedDebug --no-build-cache --rerun-tasks --stacktrace
       - name: Сохранить APK
         uses: actions/upload-artifact@v4
         with:
