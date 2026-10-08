@@ -20,6 +20,7 @@ public final class MainActivity extends Activity {
  android.content.SharedPreferences prefs;
  TextView statusView;
  Button install;
+ Button cancel;
  static void changed(){
   MainActivity a=visible.get();
   if(a!=null) a.runOnUiThread(()->{a.refresh();a.confirmPending();});
@@ -30,7 +31,7 @@ public final class MainActivity extends Activity {
   if(prefs.getBoolean("busy",false)&&!preparing){
    int state=prefs.getInt("status",-99);
    PackageInstaller.SessionInfo info=getPackageManager().getPackageInstaller().getSessionInfo(prefs.getInt("session",-1));
-   if((state==-97&&(info==null||!info.isSealed()))||(state==PackageInstaller.STATUS_PENDING_USER_ACTION&&pending==null))
+   if(state==-97&&(info==null||!info.isSealed()))
     prefs.edit().putBoolean("busy",false).putInt("status",-98).putString("message","Предыдущий диалог или подготовка прерваны. Повторите установку.").commit();
   }
   LinearLayout content=new LinearLayout(this);
@@ -38,6 +39,12 @@ public final class MainActivity extends Activity {
   TextView title=new TextView(this);title.setText("Проверка установки Джарвиса");title.setTextSize(24);title.setTextColor(Color.rgb(16,63,38));content.addView(title);
   TextView info=new TextView(this);info.setText("\nВнутри находится Джарвис 0.4.3. Этот установщик покажет причину отказа Android. Он не удаляет старое приложение и его данные.\n");info.setTextSize(16);content.addView(info);
   install=new Button(this);install.setText("Установить новую версию");install.setOnClickListener(v->begin());content.addView(install);
+  cancel=new Button(this);cancel.setText("Отменить проверку");cancel.setOnClickListener(v->{
+   try{
+    getPackageManager().getPackageInstaller().abandonSession(prefs.getInt("session",-1));
+    pending=null;prefs.edit().putInt("status",PackageInstaller.STATUS_FAILURE_ABORTED).putString("message","Проверка отменена пользователем").putBoolean("busy",false).commit();refresh();
+   }catch(Exception e){failure(e);}
+  });content.addView(cancel);
   Button share=new Button(this);share.setText("Отправить отчёт");share.setOnClickListener(v->{Intent i=new Intent(Intent.ACTION_SEND);i.setType("text/plain");i.putExtra(Intent.EXTRA_TEXT,report());startActivity(Intent.createChooser(i,"Отправить отчёт"));});content.addView(share);
   statusView=new TextView(this);statusView.setTextSize(16);statusView.setTextColor(Color.rgb(16,63,38));
   ScrollView scroll=new ScrollView(this);scroll.addView(statusView);content.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));setContentView(content);refresh();
@@ -68,7 +75,7 @@ public final class MainActivity extends Activity {
   int s=prefs.getInt("status",-99);
   return "Проверка установки Джарвиса\nВерсия APK: 0.4.3\nSHA256: "+APK_SHA+"\nУстройство: "+Build.MANUFACTURER+" "+Build.MODEL+"\nAndroid: "+Build.VERSION.RELEASE+" / API "+Build.VERSION.SDK_INT+"\nАрхитектура: "+String.join(",",Build.SUPPORTED_ABIS)+"\nСессия: "+prefs.getInt("session",-1)+"\nСтатус: "+s+" — "+statusName(s)+"\nОтвет Android:\n"+prefs.getString("message","");
  }
- void refresh(){statusView.setText("\n"+report());install.setEnabled(!prefs.getBoolean("busy",false));}
+ void refresh(){statusView.setText("\n"+report());install.setEnabled(!prefs.getBoolean("busy",false));cancel.setEnabled(prefs.getBoolean("busy",false)&&!preparing&&prefs.getInt("session",-1)>=0);}
  void failure(Exception e){
   prefs.edit().putInt("status",-98).putString("message",e.getClass().getSimpleName()+": "+e.getMessage()).putBoolean("busy",false).commit();changed();
  }
@@ -107,7 +114,7 @@ public final class MainActivity extends Activity {
    }catch(Exception e){
     if(sessionId>=0)try{getPackageManager().getPackageInstaller().abandonSession(sessionId);}catch(Exception ignored){}
     failure(e);
-   }finally{preparing=false;apk.delete();}
+   }finally{preparing=false;apk.delete();changed();}
   },"apk-install-check").start();
  }
 }
