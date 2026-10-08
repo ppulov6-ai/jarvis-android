@@ -41,7 +41,7 @@ jobs:
           before = '\tcase id := <-executed:\n'
           assert text.count(before) == 2
           text = text.replace(before, before + '\t\twaitForJobPersistence(t, cs, id)\n')
-          cron_test.write_text(text + '\n// The callback fires before executeJobByID persists its final state. Wait for\n// that write under the same lock before TempDir cleanup can remove the store.\nfunc waitForJobPersistence(t *testing.T, cs *CronService, id string) {\n\tt.Helper()\n\tdeadline := time.Now().Add(2 * time.Second)\n\tfor {\n\t\tcs.mu.RLock()\n\t\tcomplete := false\n\t\tfor _, job := range cs.store.Jobs {\n\t\t\tif job.ID == id && job.State.LastStatus == "ok" {\n\t\t\t\tcomplete = true\n\t\t\t}\n\t\t}\n\t\tcs.mu.RUnlock()\n\t\tif complete {\n\t\t\treturn\n\t\t}\n\t\tif time.Now().After(deadline) {\n\t\t\tt.Fatal("job final state was not persisted")\n\t\t}\n\t\ttime.Sleep(time.Millisecond)\n\t}\n}\n')
+          cron_test.write_text(text + '\n// The callback fires before executeJobByID persists its final state. Wait for\n// that write under the same lock before TempDir cleanup can remove the store.\nfunc waitForJobPersistence(t *testing.T, cs *CronService, id string) {\n\tt.Helper()\n\tdeadline := time.Now().Add(2 * time.Second)\n\tfor {\n\t\tcs.mu.RLock()\n\t\tcomplete := true\n\t\tfor _, job := range cs.store.Jobs {\n\t\t\tif job.ID == id {\n\t\t\t\tcomplete = job.State.LastStatus == "ok"\n\t\t\t\tbreak\n\t\t\t}\n\t\t}\n\t\tcs.mu.RUnlock()\n\t\tif complete {\n\t\t\treturn\n\t\t}\n\t\tif time.Now().After(deadline) {\n\t\t\tt.Fatal("job final state was not persisted")\n\t\t}\n\t\ttime.Sleep(time.Millisecond)\n\t}\n}\n')
           PYCODE
       - uses: actions/setup-go@v5
         with:
