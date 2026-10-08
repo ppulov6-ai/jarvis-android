@@ -1,0 +1,68 @@
+name: Диагностика установки на телефоне
+on:
+  push:
+    branches: [install-diagnostics]
+    paths: [.github/workflows/install-helper.yml]
+permissions:
+  contents: read
+jobs:
+  helper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Собрать диагностический установщик
+        run: bash scripts/build-install-helper.sh
+      - name: Подготовить старую версию для проверки конфликта
+        run: |
+          curl --fail --location --retry 3 https://github.com/ppulov6-ai/jarvis-android/releases/download/android-e9f43f14bce1/Jarvisjon-ru-arm64.apk -o old.apk
+          echo "514c896725d7fd14f3d1b2bd13926ecae140c704a45cdb26e9af1a0aaec23f96  old.apk" | sha256sum --check
+      - name: Подготовить KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Проверить диалоги и установку дважды
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          disk-size: 8G
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: python3 scripts/test-install-helper.py
+      - name: Сохранить журнал проверки
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-diagnostics-evidence
+          path: evidence/
+          retention-days: 14
+      - name: Сохранить проверенный установщик
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-install-check
+          path: diagnostic-apk/Jarvis-install-check.apk
+          retention-days: 14
+  publish:
+    needs: helper
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: jarvis-install-check
+          path: diagnostic-apk
+      - name: Опубликовать диагностический установщик
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="install-check-${GITHUB_SHA:0:12}"
+          gh release create "$tag" diagnostic-apk/Jarvis-install-check.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Проверка установки Джарвиса на телефоне" --notes "Диагностический установщик содержит исходный APK Джарвиса 0.4.3 с проверенным SHA256. Показывает фактический код и сообщение PackageInstaller. Ничего не удаляет, не имеет доступа к контактам, микрофону или интернету. Для установки Android запросит разрешение устанавливать приложения из этого источника. Это средство диагностики отказа на Samsung, а не подтверждённое исправление основной версии."
