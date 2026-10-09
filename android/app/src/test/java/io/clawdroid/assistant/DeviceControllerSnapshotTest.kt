@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import io.mockk.*
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
@@ -73,5 +74,25 @@ class DeviceControllerSnapshotTest {
         every { anyConstructed<Rect>().toString() } returns "bounds"
         every { button.actionList } returns emptyList()
         assertNull(controller.captureTarget(label, "com.example.exchange"))
+    }
+    @Test fun `re-resolved text field must retain expected target before any write`() = runTest {
+        mockkConstructor(Rect::class)
+        every { anyConstructed<Rect>().toString() } returns "bounds"
+        val root = node("")
+        val field = node("original")
+        every { field.isEditable } returns true
+        every { field.actionList } returns listOf(mockk { every { id } returns AccessibilityNodeInfo.ACTION_SET_TEXT })
+        every { root.childCount } returns 1
+        every { root.getChild(0) } returns field
+        val service = mockk<AccessibilityService> {
+            every { packageName } returns "ru.pulat.jarvis"
+            every { rootInActiveWindow } returns root
+        }
+        val controller = DeviceController().apply { setService(service) }
+        val expected = controller.captureTarget("0.0", "com.example.exchange")!!
+        every { field.text } returns "changed"
+        assertEquals(DeviceController.TextOutcome.REJECTED,
+            controller.inputTextAt("message", "com.example.exchange", "0.0", expected))
+        verify(exactly = 0) { field.performAction(any(), any()) }
     }
 }
