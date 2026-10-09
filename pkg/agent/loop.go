@@ -780,6 +780,16 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.Message, opts processOptions, currentStatus *atomic.Value) (string, int, error) {
 	iteration := 0
 	var finalContent string
+	turnID := newTimingID()
+	turnStarted := time.Now()
+	al.emitTiming(opts, ctx, turnID, "turn_started", 0, 0)
+	defer func() {
+		phase := "turn_finished"
+		if ctx.Err() != nil {
+			phase = "turn_cancelled"
+		}
+		al.emitTiming(opts, ctx, turnID, phase, 0, time.Since(turnStarted).Milliseconds())
+	}()
 
 	// Use locale from opts (set by processMessage), default to "en"
 	locale := opts.Locale
@@ -838,7 +848,18 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 			if al.temperature > 0 {
 				llmOpts["temperature"] = al.temperature
 			}
+			callStarted := time.Now()
+			callNumber := iteration*3 + retry
+			al.emitTiming(opts, ctx, turnID, "llm_started", callNumber, 0)
 			response, err = al.provider.Chat(ctx, messages, providerToolDefs, al.model, llmOpts)
+			phase := "llm_success"
+			if err != nil {
+				phase = "llm_error"
+			}
+			if ctx.Err() != nil {
+				phase = "llm_cancelled"
+			}
+			al.emitTiming(opts, ctx, turnID, phase, callNumber, time.Since(callStarted).Milliseconds())
 
 			if err == nil {
 				if response.ReplayReset {

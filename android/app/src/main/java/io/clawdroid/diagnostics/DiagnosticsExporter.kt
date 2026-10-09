@@ -20,18 +20,18 @@ object DiagnosticsExporter {
         val file = File.createTempFile("Jarvisjon-test-${System.currentTimeMillis()}-", ".zip", directory)
         val enabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
             .split(':').any { it.substringBefore('/') == context.packageName }
-        val report = JSONObject().put("schema", 1).put("created_utc_ms", System.currentTimeMillis())
+        val report = JSONObject().put("schema", 2).put("created_utc_ms", System.currentTimeMillis())
             .put("app_version", BuildConfig.VERSION_NAME).put("version_code", BuildConfig.VERSION_CODE)
             .put("build_type", BuildConfig.BUILD_TYPE).put("android_sdk", Build.VERSION.SDK_INT)
             .put("manufacturer", Build.MANUFACTURER).put("device_model", Build.MODEL)
             .put("microphone_allowed", androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED)
             .put("accessibility_enabled", enabled).put("overlay_allowed", Settings.canDrawOverlays(context))
             .put("events", JSONArray(DiagnosticEvents.snapshot().map { event ->
-                JSONObject().put("time_utc_ms", event.time).put("component", event.component).put("code", event.code).apply { event.status?.let { put("http_status", it) }; event.durationMs?.let { put("duration_ms", it) } }
+                JSONObject().put("time_utc_ms", event.time).put("component", event.component).put("code", event.code).apply { event.status?.let { put("http_status", it) }; event.durationMs?.let { put("duration_ms", it) }; event.turnId?.let { put("turn_id", it) }; event.call?.let { put("call", it) } }
             }))
         ZipOutputStream(file.outputStream()).use { zip ->
             zip.putNextEntry(ZipEntry("diagnostics.json")); zip.write(report.toString(2).toByteArray()); zip.closeEntry()
-            zip.putNextEntry(ZipEntry("README.txt")); zip.write("Диагностика Джарвиса. Содержит состояние разрешений и коды событий последних тестов. Ключи, переписка, снимки экрана, файлы пользователя и сырые журналы не включены. Сохраняются последние 200 событий. Опишите шаги воспроизведения вместе с этим архивом.".toByteArray()); zip.closeEntry()
+            zip.putNextEntry(ZipEntry("README.txt")); zip.write("Диагностика Джарвиса. Содержит состояние разрешений, коды событий и время запросов модели последних тестов. Идентификаторы turn_id и call связывают начало и завершение обработки. Ключи, переписка, снимки экрана, файлы пользователя и сырые журналы не включены. Сохраняются последние 200 событий. Опишите шаги воспроизведения вместе с этим архивом.".toByteArray()); zip.closeEntry()
         }
         return file
     }

@@ -23,6 +23,9 @@ func TestAndroidSessionUsesPermanentGuidance(t *testing.T) {
 			"verify the actual effect",
 			"stop guessing",
 			"Honor approval already granted",
+			"Keep progress brief",
+			"exact displayed interval label",
+			"absent from the accessibility tree",
 		} {
 			if !strings.Contains(messages[0].Content, required) {
 				t.Errorf("chat %q missing permanent rule %q", chatID, required)

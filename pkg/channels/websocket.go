@@ -164,7 +164,7 @@ func (c *WebSocketChannel) Send(ctx context.Context, msg bus.OutboundMessage) er
 		_ = json.Unmarshal([]byte(msg.Content), &request)
 		msg.Generation = request.Generation
 	}
-	if !c.bus.IsCurrent("websocket:"+msg.ChatID, msg.Generation) {
+	if msg.Type != "diagnostic" && !c.bus.IsCurrent("websocket:"+msg.ChatID, msg.Generation) {
 		return nil
 	}
 	if !ok {
@@ -203,7 +203,7 @@ func (c *WebSocketChannel) Send(ctx context.Context, msg bus.OutboundMessage) er
 // clientType must be read under lock by the caller to avoid data races.
 func (c *WebSocketChannel) maybeBroadcast(msg bus.OutboundMessage, clientType string, originalErr error) error {
 	// Status messages are ephemeral — don't broadcast.
-	if msg.Type == "status" || msg.Type == "status_end" {
+	if msg.Type == "status" || msg.Type == "status_end" || msg.Type == "diagnostic" {
 		return originalErr
 	}
 

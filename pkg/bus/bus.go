@@ -173,3 +173,16 @@ func (mb *MessageBus) InvalidateSession(session string) {
 		handler(session, generation)
 	}
 }
+
+// TryPublishOutbound drops optional telemetry rather than delaying user actions.
+func (mb *MessageBus) TryPublishOutbound(msg OutboundMessage) {
+	mb.mu.RLock()
+	defer mb.mu.RUnlock()
+	if mb.closed {
+		return
+	}
+	select {
+	case mb.outbound <- msg:
+	default:
+	}
+}

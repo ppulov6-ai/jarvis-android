@@ -71,6 +71,10 @@ class AssistantConnectionImpl(
     init {
         scope.launch {
             wsClient.incomingMessages.collect { dto ->
+                if (dto.type == "diagnostic") {
+                    io.clawdroid.core.data.remote.TimingDiagnostics.accept(dto.content)
+                    return@collect
+                }
                 if (generation.get() > 0L && dto.generation != generation.get() && dto.type != "setup_required") return@collect
                 when (dto.type) {
                     "status" -> _statusText.value = dto.content
