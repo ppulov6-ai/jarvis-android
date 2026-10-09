@@ -199,6 +199,20 @@ class ChatRepositoryImplTest {
     inner class IncomingMessageHandling {
 
         @Test
+        fun `late diagnostic survives Stop without displaying or persisting a message`() = runTest {
+            val received = mutableListOf<io.clawdroid.core.data.remote.TimingDiagnostics.Event>()
+            io.clawdroid.core.data.remote.TimingDiagnostics.collector = { received.add(it) }
+            try {
+                repository.stop()
+                val content = """{"event_id":"${java.util.UUID.randomUUID()}","turn_id":"00000000-0000-0000-0000-000000000001","phase":"llm_cancelled","call":3,"duration_ms":17}"""
+                incomingMessages.emit(WsOutgoing(content = content, type = "diagnostic", generation = 0))
+                assertEquals(1, received.size)
+                coVerify(exactly = 0) { messageDao.insert(any()) }
+                assertNull(repository.statusLabel.value)
+            } finally { io.clawdroid.core.data.remote.TimingDiagnostics.collector = null }
+        }
+
+        @Test
         fun `status message updates statusLabel`() = runTest {
             incomingMessages.emit(WsOutgoing(content = "Thinking...", type = "status"))
 

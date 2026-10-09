@@ -38,6 +38,25 @@ class UiObservationRegistryTest {
             assertEquals(1, results.count { it.get() })
         } finally { pool.shutdownNow() }
     }
+    @Test fun `unrelated live text permits exact target but never coordinate replay`() {
+        val registry = UiObservationRegistry()
+        val before = screen.copy(structureFingerprint = "layout", windowId = 3)
+        val after = before.copy(fingerprint = "updated-price")
+        val id = registry.record(before, setOf("0.1"), mapOf("0.1" to "timeframe-15m"), setOf("0.1"))
+        assertFalse(registry.consume(id, after))
+        assertFalse(registry.consume(id, after, "0.1", "timeframe-1h", true))
+        assertFalse(registry.consume(id, after.copy(windowId = 4), "0.1", "timeframe-15m", true))
+        assertFalse(registry.consume(id, after.copy(structureFingerprint = "moved-target"), "0.1", "timeframe-15m", true))
+        assertFalse(registry.consume(id, after.copy(contextFingerprint = "different-instrument"), "0.1", "timeframe-15m", true))
+        assertTrue(registry.consume(id, after, "0.1", "timeframe-15m", true))
+        assertFalse(registry.consume(id, after, "0.1", "timeframe-15m", true))
+    }
+    @Test fun `a new timeframe label cannot upgrade an ordinary observation`() {
+        val registry = UiObservationRegistry()
+        val before = screen.copy(structureFingerprint = "layout")
+        val id = registry.record(before, setOf("0.1"), mapOf("0.1" to "target"))
+        assertFalse(registry.consume(id, before.copy(fingerprint = "new-recipient"), "0.1", "target", true))
+    }
     @Test fun `coordinates must be finite and inside the full display`() {
         val size = 1080 to 2400
         assertTrue(coordinatesInDisplay(0f, 2399f, size))

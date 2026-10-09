@@ -45,6 +45,8 @@ class ToolRequestHandler(
 ) {
 
     private val operationMutex = Mutex()
+    // Accessed only inside operationMutex; nested helpers share one hidden screen phase.
+    private var overlayHiddenDepth = 0
 
     private val actionHandlers: List<ActionHandler> = listOf(
         AlarmActionHandler(),
@@ -74,7 +76,11 @@ class ToolRequestHandler(
         val started = android.os.SystemClock.elapsedRealtime()
         io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "${category}_started")
         return try {
-            val result = operationMutex.withLock { handleInternal(request) }
+            val result = operationMutex.withLock {
+                if (request.action in setOf("tap", "swipe", "text", "keyevent") && deviceController.isAvailable)
+                    withOverlayHidden { handleInternal(request) }
+                else handleInternal(request)
+            }
             io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "${category}_${if (result.success) "success" else "error"}", durationMs = (android.os.SystemClock.elapsedRealtime() - started).coerceIn(0, 86400000))
             result
         } catch (error: CancellationException) {
@@ -89,24 +95,36 @@ class ToolRequestHandler(
             if (request.action !in setOf("get_ui_tree", "screenshot", "tap", "swipe", "text", "search_apps", "app_info", "search_contacts", "get_contact_detail")) observations.clear()
             val guarded = request.action in setOf("tap", "swipe", "text", "keyevent")
             if (guarded) requireAccessibility(request)?.let { return it }
+            val targetPath = if (request.action in setOf("tap", "text"))
+                request.params?.get("node_id")?.jsonPrimitive?.contentOrNull else null
+            var approvedTarget: String? = null
+            var approvedTimeframe = false
             val approvedScreen = if (guarded) withOverlayHidden {
-                deviceController.captureApprovalScreen()
+                deviceController.captureApprovalScreen()?.also { screen ->
+                    if (targetPath != null) {
+                        approvedTarget = deviceController.captureTarget(targetPath, screen.packageName)
+                        approvedTimeframe = request.action == "tap" && deviceController.isTimeframeTarget(targetPath, screen.packageName)
+                    }
+                }
             } else null
             if (guarded && approvedScreen == null) {
                 return ToolResponse(request.requestId, false, error = "Не удалось безопасно зафиксировать экран приложения. Действие отменено")
             }
+            if (targetPath != null && approvedTarget == null) return observationRejected(request)
+            val remembered = ActionConfirmation.canRemember(request.action) && ActionConfirmation.isDeviceAccessGranted(context)
             if (ActionSafetyPolicy.requiresConfirmation(request.action)) {
-                val approved = try {
-                    withContext(Dispatchers.Main) { setOverlayVisibility(false) }
+                val approved = if (remembered) true else try {
+                    if (overlayHiddenDepth == 0) withContext(Dispatchers.Main) { setOverlayVisibility(false) }
                     ActionConfirmation.ask(context, request, onStop, approvedScreen?.description)
                 } finally {
-                    withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
+                    if (overlayHiddenDepth == 0) withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
                 }
                 currentCoroutineContext().ensureActive()
-                if (approved && guarded) {
+                if (approved && guarded && !remembered) {
                     val restored = withOverlayHidden {
                         withTimeoutOrNull(2_000) {
-                            while (!ScreenApprovalGuard.matches(approvedScreen, deviceController.captureApprovalScreen())) delay(50)
+                            while (!matchesActionScreen(approvedScreen, deviceController.captureApprovalScreen(), targetPath,
+                                    approvedTarget, approvedTimeframe)) delay(50)
                             true
                         } == true
                     }
@@ -121,7 +139,7 @@ class ToolRequestHandler(
                 "launch_app" -> handleLaunchApp(request)
                 "screenshot" -> handleScreenshot(request)
                 "get_ui_tree" -> handleGetUiTree(request)
-                "tap" -> handleTap(request, approvedScreen)
+                "tap" -> handleTap(request, approvedScreen, approvedTarget, approvedTimeframe)
                 "swipe" -> handleSwipe(request, approvedScreen)
                 "text" -> handleText(request, approvedScreen)
                 "keyevent" -> handleKeyEvent(request, approvedScreen)
@@ -201,12 +219,16 @@ class ToolRequestHandler(
     }
 
     private suspend fun <T> withOverlayHidden(block: suspend () -> T): T {
+        val outer = overlayHiddenDepth++ == 0
         return try {
-            withContext(Dispatchers.Main) { setOverlayVisibility(false) }
-            delay(150)
+            if (outer) {
+                withContext(Dispatchers.Main) { setOverlayVisibility(false) }
+                delay(150)
+            }
             block()
         } finally {
-            withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
+            overlayHiddenDepth--
+            if (outer) withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
         }
     }
 
@@ -328,14 +350,16 @@ class ToolRequestHandler(
             val sb = StringBuilder()
             val nodeCount = intArrayOf(0)
             val paths = mutableSetOf<String>()
+            val targets = mutableMapOf<String, String>()
+            val timeframePaths = mutableSetOf<String>()
             val startPath = findNodePath(root, startNode)
                 ?: return@withOverlayHidden ToolResponse(request.requestId, false, error = "Выбранный элемент уже изменился. Получите новое дерево экрана.")
-            dumpNode(startNode, sb, 0, maxDepth, maxNodes, nodeCount, startPath, paths)
+            dumpNode(startNode, sb, 0, maxDepth, maxNodes, nodeCount, startPath, paths, targets, timeframePaths)
             if (nodeCount[0] >= maxNodes) {
                 sb.appendLine("[truncated: max_nodes=$maxNodes reached]")
             }
-            if (!ScreenApprovalGuard.matches(before, deviceController.captureApprovalScreen())) return@withOverlayHidden changedScreen(request)
-            val observationId = observations.record(before, paths)
+            if (!ScreenApprovalGuard.matchesStructure(before, deviceController.captureApprovalScreen())) return@withOverlayHidden changedScreen(request)
+            val observationId = observations.record(before, paths, targets, timeframePaths)
             val size = deviceController.screenSize()
             ToolResponse(request.requestId, true, result = "observation_id=$observationId\nРазмер полного экрана: ${size?.first}x${size?.second}; координаты в физических пикселях. Используйте node_id. После действия получите новое дерево.\n$sb")
         }
@@ -394,7 +418,9 @@ class ToolRequestHandler(
         maxNodes: Int,
         nodeCount: IntArray,
         path: String,
-        paths: MutableSet<String>
+        paths: MutableSet<String>,
+        targets: MutableMap<String, String>,
+        timeframePaths: MutableSet<String>
     ) {
         if (nodeCount[0] >= maxNodes) return
         // Skip invisible nodes
@@ -411,7 +437,15 @@ class ToolRequestHandler(
             .removePrefix("android.view.")
 
         paths.add(path)
+        val candidateInterval = TimeframeTargetPolicy.labels(node.text?.toString(), node.contentDescription?.toString()) != null
+        val actionable = node.isEditable || node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
+        if (actionable || candidateInterval) {
+            node.packageName?.toString()?.let { pkg -> deviceController.captureTarget(node, pkg)?.let { targets[path] = it } }
+        }
+        val timeframe = candidateInterval && node.packageName?.toString()?.let { deviceController.isTimeframeTarget(node, it) } == true
+        if (timeframe) timeframePaths.add(path)
         sb.append("${indent}[${shortClass}] node_id=$path")
+        if (timeframe) sb.append(" stable_timeframe")
 
         // Only output non-empty fields
         if (node.isPassword) {
@@ -441,7 +475,7 @@ class ToolRequestHandler(
         for (i in 0 until node.childCount) {
             if (nodeCount[0] >= maxNodes) return
             val child = node.getChild(i) ?: continue
-            dumpNode(child, sb, depth + 1, maxDepth, maxNodes, nodeCount, "$path.$i", paths)
+            dumpNode(child, sb, depth + 1, maxDepth, maxNodes, nodeCount, "$path.$i", paths, targets, timeframePaths)
         }
     }
 
@@ -450,10 +484,19 @@ class ToolRequestHandler(
         return ToolResponse(request.requestId, false, error = "Наблюдение экрана отсутствует, устарело или элемент изменился. Получите get_ui_tree и используйте его observation_id и node_id. Не угадывайте координаты.")
     }
 
-    private fun consumeObservation(request: ToolRequest, screen: ApprovedScreen?, path: String? = null): Boolean =
-        observations.consume(request.params?.get("observation_id")?.jsonPrimitive?.contentOrNull, screen, path)
+    private fun consumeObservation(request: ToolRequest, screen: ApprovedScreen?, path: String? = null,
+                                   target: String? = null, timeframe: Boolean = false): Boolean =
+        observations.consume(request.params?.get("observation_id")?.jsonPrimitive?.contentOrNull, screen, path, target, timeframe)
 
-    private suspend fun handleTap(request: ToolRequest, approvedScreen: ApprovedScreen?): ToolResponse {
+    private fun matchesActionScreen(approved: ApprovedScreen?, current: ApprovedScreen?, path: String?,
+                                    target: String? = null, timeframe: Boolean = false): Boolean {
+        if (!timeframe || path == null) return ScreenApprovalGuard.matches(approved, current)
+        if (!ScreenApprovalGuard.matchesContext(approved, current) || target == null) return false
+        return deviceController.isTimeframeTarget(path, current!!.packageName) &&
+            deviceController.captureTarget(path, current.packageName) == target
+    }
+
+    private suspend fun handleTap(request: ToolRequest, approvedScreen: ApprovedScreen?, approvedTarget: String?, approvedTimeframe: Boolean): ToolResponse {
         requireAccessibility(request)?.let { return it }
         val path = request.params?.get("node_id")?.jsonPrimitive?.contentOrNull
         val x = request.params?.get("x")?.jsonPrimitive?.doubleOrNull?.toFloat()
@@ -466,13 +509,17 @@ class ToolRequestHandler(
             return ToolResponse(request.requestId, false, error = "Укажите node_id либо пару координат x,y свежего дерева экрана")
         return withOverlayHidden {
             val current = deviceController.captureApprovalScreen()
-            if (!ScreenApprovalGuard.matches(approvedScreen, current)) return@withOverlayHidden changedScreen(request)
-            if (!consumeObservation(request, current, path)) return@withOverlayHidden observationRejected(request)
+            val node = if (path != null && current != null) deviceController.resolveNode(path, current.packageName) else null
+            val target = if (node != null && current != null) deviceController.captureTarget(node, current.packageName) else null
+            val timeframe = node != null && current != null && deviceController.isTimeframeTarget(node, current.packageName)
+            if (!matchesActionScreen(approvedScreen, current, path, approvedTarget, approvedTimeframe)) return@withOverlayHidden changedScreen(request)
+            if (path != null && target != approvedTarget) return@withOverlayHidden observationRejected(request)
+            if (!consumeObservation(request, current, path, target, timeframe && approvedTimeframe)) return@withOverlayHidden observationRejected(request)
             val success = if (path != null) {
-                val node = deviceController.resolveNode(path, current!!.packageName)
-                    ?: return@withOverlayHidden observationRejected(request)
+                if (node == null || target == null || deviceController.captureTarget(node, current!!.packageName) != target)
+                    return@withOverlayHidden observationRejected(request)
                 currentCoroutineContext().ensureActive()
-                deviceController.clickNode(node, current.packageName)
+                deviceController.clickNode(node, current!!.packageName)
             } else {
                 if (!coordinatesInDisplay(x!!, y!!, deviceController.screenSize()))
                     return@withOverlayHidden ToolResponse(request.requestId, false, error = "Координаты за пределами полного экрана. Не выполняйте случайные нажатия.")
@@ -522,9 +569,10 @@ class ToolRequestHandler(
         return withOverlayHidden {
             val current = deviceController.captureApprovalScreen()
             if (!ScreenApprovalGuard.matches(approvedScreen, current)) return@withOverlayHidden changedScreen(request)
-            if (!consumeObservation(request, current, path)) return@withOverlayHidden observationRejected(request)
+            val target = if (path != null && current != null) deviceController.captureTarget(path, current.packageName) else null
+            if (!consumeObservation(request, current, path, target)) return@withOverlayHidden observationRejected(request)
             currentCoroutineContext().ensureActive()
-            when (deviceController.inputTextAt(text, current!!.packageName, path)) {
+            when (deviceController.inputTextAt(text, current!!.packageName, path, target)) {
                 DeviceController.TextOutcome.VERIFIED -> ToolResponse(request.requestId, true, result = "Текст введён в выбранное поле и проверен. Сообщение ещё не отправлено.")
                 DeviceController.TextOutcome.REJECTED -> ToolResponse(request.requestId, false, error = "Выбранное поле недоступно для ввода. Найдите editable supports_set_text в новом дереве. Не нажимайте в других местах наугад.")
                 DeviceController.TextOutcome.UNVERIFIED -> ToolResponse(request.requestId, false, error = "Команда ввода выполнена, но содержимое поля подтвердить не удалось. Не повторяйте ввод и не отправляйте сообщение; сообщите об этом пользователю по-русски.")

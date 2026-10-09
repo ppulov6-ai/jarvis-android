@@ -27,6 +27,9 @@ class ClawDroidApp : Application() {
     override fun onCreate() {
         super.onCreate()
         io.clawdroid.diagnostics.DiagnosticEvents.initialize(this)
+        io.clawdroid.core.data.remote.TimingDiagnostics.collector = { event ->
+            io.clawdroid.diagnostics.DiagnosticEvents.record("agent", event.phase, durationMs = event.duration_ms, turnId = event.turn_id, call = event.call)
+        }
         val koinApp = startKoin {
             androidContext(this@ClawDroidApp)
             modules(appModule, flavorModule, configModule)
