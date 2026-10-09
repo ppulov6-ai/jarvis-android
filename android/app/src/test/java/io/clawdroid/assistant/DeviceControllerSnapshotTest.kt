@@ -11,10 +11,20 @@ import org.junit.jupiter.api.Test
 
 class DeviceControllerSnapshotTest {
     @AfterEach fun cleanup() { unmockkAll() }
-    private fun node(label: String, click: Boolean = false): AccessibilityNodeInfo = mockk(relaxed = true) {
+    private fun node(label: String, click: Boolean = false): AccessibilityNodeInfo = mockk {
         every { packageName } returns "com.example.exchange"
         every { className } returns "android.widget.TextView"
         every { text } returns label
+        every { contentDescription } returns null
+        every { viewIdResourceName } returns null
+        every { isPassword } returns false
+        every { isEditable } returns false
+        every { isClickable } returns click
+        every { isFocused } returns false
+        every { isSelected } returns false
+        every { isChecked } returns false
+        every { getBoundsInScreen(any()) } just Runs
+        every { getChild(any()) } returns null
         every { isVisibleToUser } returns true
         every { isEnabled } returns true
         every { windowId } returns 7
@@ -44,6 +54,7 @@ class DeviceControllerSnapshotTest {
         assertTrue(ScreenApprovalGuard.matchesStructure(before, after))
         assertTrue(ScreenApprovalGuard.matchesContext(before, after))
         assertEquals(target, controller.captureTarget("0.1", before.packageName))
+        assertTrue(controller.isTimeframeTarget("0.1", before.packageName))
         val registry = UiObservationRegistry()
         val observation = registry.record(before, setOf("0.1"), mapOf("0.1" to target), setOf("0.1"))
         assertTrue(registry.consume(observation, after, "0.1", controller.captureTarget("0.1", before.packageName), controller.isTimeframeTarget("0.1", before.packageName)))
