@@ -82,4 +82,57 @@ class ToolRequestHandlerSafetyTest {
         coVerify(exactly = 1) { device.tap(10f, 20f) }
     }
 
+    @Test fun `observed node is clicked without coordinate guessing and cannot be reused`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        mockkObject(ActionConfirmation)
+        coEvery { ActionConfirmation.ask(any(), any(), any(), any()) } returns true
+        val device = controller()
+        val node = mockk<android.view.accessibility.AccessibilityNodeInfo>()
+        every { device.resolveNode("0.2", approved.packageName) } returns node
+        every { device.clickNode(node, approved.packageName) } returns true
+        val observations = UiObservationRegistry(makeId = { "observation-one" })
+        observations.record(approved, setOf("0.2"))
+        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), {}, {}, observations = observations)
+        val req = ToolRequest(requestId = "node", action = "tap", params = buildJsonObject {
+            put("observation_id", "observation-one"); put("node_id", "0.2")
+        })
+        assertTrue(handler.handle(req).success)
+        assertFalse(handler.handle(req).success)
+        verify(exactly = 1) { device.clickNode(node, approved.packageName) }
+        coVerify(exactly = 0) { device.tap(any(), any()) }
+    }
+    @Test fun `unobserved target is rejected without clicking another node`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        mockkObject(ActionConfirmation)
+        coEvery { ActionConfirmation.ask(any(), any(), any(), any()) } returns true
+        val device = controller()
+        val observations = UiObservationRegistry(makeId = { "observation-one" })
+        observations.record(approved, setOf("0.2"))
+        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), {}, {}, observations = observations)
+        val req = ToolRequest(requestId = "wrong", action = "tap", params = buildJsonObject {
+            put("observation_id", "observation-one"); put("node_id", "0.9")
+        })
+        assertFalse(handler.handle(req).success)
+        verify(exactly = 0) { device.clickNode(any(), any()) }
+        coVerify(exactly = 0) { device.tap(any(), any()) }
+    }
+    @Test fun `unverified text never becomes a successful or repeated write`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        mockkObject(ActionConfirmation)
+        coEvery { ActionConfirmation.ask(any(), any(), any(), any()) } returns true
+        val device = controller()
+        coEvery { device.inputTextAt("тест", approved.packageName, "0.2") } returns DeviceController.TextOutcome.UNVERIFIED
+        val observations = UiObservationRegistry(makeId = { "observation-one" })
+        observations.record(approved, setOf("0.2"))
+        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), {}, {}, observations = observations)
+        val req = ToolRequest(requestId = "text", action = "text", params = buildJsonObject {
+            put("observation_id", "observation-one"); put("node_id", "0.2"); put("text", "тест")
+        })
+        val response = handler.handle(req)
+        assertFalse(response.success)
+        assertTrue(response.error.orEmpty().contains("Не повторяйте ввод"))
+        assertFalse(handler.handle(req).success)
+        coVerify(exactly = 1) { device.inputTextAt(any(), any(), any()) }
+    }
+
 }

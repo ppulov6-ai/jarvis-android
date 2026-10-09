@@ -423,6 +423,7 @@ class ToolRequestHandler(
         sb.append(" bounds=$bounds")
         // Only output non-default values: clickable=true (default is false), enabled=false (default is true)
         if (node.isClickable) sb.append(" clickable")
+        if (node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }) sb.append(" supports_click")
         if (node.isEditable) sb.append(" editable")
         if (node.isFocused) sb.append(" focused")
         if (!node.isPassword && node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT }) sb.append(" supports_set_text")
@@ -457,6 +458,8 @@ class ToolRequestHandler(
         val path = request.params?.get("node_id")?.jsonPrimitive?.contentOrNull
         val x = request.params?.get("x")?.jsonPrimitive?.doubleOrNull?.toFloat()
         val y = request.params?.get("y")?.jsonPrimitive?.doubleOrNull?.toFloat()
+        if (request.params?.containsKey("x2") == true || request.params?.containsKey("y2") == true)
+            return ToolResponse(request.requestId, false, error = "Нажатие не принимает координаты конца жеста")
         if ((path != null && (request.params?.containsKey("x") == true || request.params?.containsKey("y") == true)) || (path == null && (x == null || y == null)))
             return ToolResponse(request.requestId, false, error = "Укажите node_id либо пару координат x,y свежего дерева экрана")
         return withOverlayHidden {
@@ -510,6 +513,8 @@ class ToolRequestHandler(
         val text = request.params?.get("text")?.jsonPrimitive?.contentOrNull
             ?: return ToolResponse(request.requestId, false, error = "Не указан текст для ввода")
         val path = request.params?.get("node_id")?.jsonPrimitive?.contentOrNull
+        if (request.params?.containsKey("node_id") == true && path == null)
+            return ToolResponse(request.requestId, false, error = "Некорректный идентификатор поля ввода")
         if (setOf("x", "y", "x2", "y2").any { request.params?.containsKey(it) == true })
             return ToolResponse(request.requestId, false, error = "Ввод текста выполняется по node_id поля, без координат")
         return withOverlayHidden {

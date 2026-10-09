@@ -60,7 +60,7 @@ var allActions = []androidAction{
         {Name: "y", Type: "number", Desc: "Start Y in full-display physical pixels", Required: true},
         {Name: "x2", Type: "number", Desc: "End X in full-display physical pixels", Required: true},
         {Name: "y2", Type: "number", Desc: "End Y in full-display physical pixels", Required: true},
-        {Name: "duration_ms", Type: "integer", Desc: "Swipe duration in milliseconds, 1 to 10000 (default 300)"},
+        {Name: "duration_ms", Type: "integer", Desc: "Swipe duration in milliseconds, 50 to 5000 (default 300)"},
     }},
     {Name: "text", Category: "ui", Desc: "Input text with fresh observation_id and observed editable node_id. If node_id omitted, only a safe focused editable field is used. Never guess a field. Refresh get_ui_tree afterwards.", UIOnly: true, Params: []androidParam{
         {Name: "observation_id", Type: "string", Desc: "UUID returned by fresh get_ui_tree; required for tap, swipe and text", Required: true},
