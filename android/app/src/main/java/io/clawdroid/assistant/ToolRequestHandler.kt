@@ -458,6 +458,8 @@ class ToolRequestHandler(
         val path = request.params?.get("node_id")?.jsonPrimitive?.contentOrNull
         val x = request.params?.get("x")?.jsonPrimitive?.doubleOrNull?.toFloat()
         val y = request.params?.get("y")?.jsonPrimitive?.doubleOrNull?.toFloat()
+        if (request.params?.containsKey("node_id") == true && path == null)
+            return ToolResponse(request.requestId, false, error = "Некорректный идентификатор элемента")
         if (request.params?.containsKey("x2") == true || request.params?.containsKey("y2") == true)
             return ToolResponse(request.requestId, false, error = "Нажатие не принимает координаты конца жеста")
         if ((path != null && (request.params?.containsKey("x") == true || request.params?.containsKey("y") == true)) || (path == null && (x == null || y == null)))
@@ -489,7 +491,7 @@ class ToolRequestHandler(
         val y = request.params?.get("y")?.jsonPrimitive?.doubleOrNull?.toFloat()
         val x2 = request.params?.get("x2")?.jsonPrimitive?.doubleOrNull?.toFloat()
         val y2 = request.params?.get("y2")?.jsonPrimitive?.doubleOrNull?.toFloat()
-        if (request.params?.containsKey("node_id") == true || (request.params?.containsKey("duration_ms") == true && request.params["duration_ms"]?.jsonPrimitive?.longOrNull == null))
+        if (request.params?.containsKey("node_id") == true || (request.params?.containsKey("duration_ms") == true && request.params?.get("duration_ms")?.jsonPrimitive?.longOrNull == null))
             return ToolResponse(request.requestId, false, error = "Некорректные параметры жеста")
         val durationMs = request.params?.get("duration_ms")?.jsonPrimitive?.longOrNull ?: 300L
         if (x == null || y == null || x2 == null || y2 == null || durationMs !in 50..5000)
