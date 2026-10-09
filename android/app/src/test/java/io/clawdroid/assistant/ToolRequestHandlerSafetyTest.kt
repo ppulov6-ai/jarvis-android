@@ -61,7 +61,7 @@ class ToolRequestHandlerSafetyTest {
         approval.complete(true)
         runCurrent()
         assertTrue(job.isCancelled)
-        assertEquals(listOf(false, true, false, true), visibility)
+        assertEquals(listOf(false, true), visibility)
         coVerify(exactly = 0) { device.tap(any(), any()) }
     }
     @Test fun `approved tap is blocked when the foreground screen changes`() = runTest {
@@ -158,13 +158,16 @@ class ToolRequestHandlerSafetyTest {
         observations.record(stable.copy(fingerprint = "price-100"), setOf("0.2"), mapOf("0.2" to "target-one"), setOf("0.2"))
         every { device.isTimeframeTarget(any<String>(), any()) } returns true
         every { device.isTimeframeTarget(any<android.view.accessibility.AccessibilityNodeInfo>(), any()) } returns true
-        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), {}, {}, observations = observations)
+        val visibility = mutableListOf<Boolean>()
+        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), { visibility.add(it) }, {}, observations = observations)
         val req = ToolRequest(requestId = "timeframe", action = "tap", params = buildJsonObject {
             put("observation_id", "observation-one"); put("node_id", "0.2")
         })
         val started = testScheduler.currentTime
         assertTrue(handler.handle(req).success)
-        assertEquals(300L, testScheduler.currentTime - started)
+        assertEquals(150L, testScheduler.currentTime - started)
+        assertEquals(listOf(false, true), visibility)
+        coVerify(exactly = 0) { ActionConfirmation.ask(any(), any(), any(), any()) }
         verify(exactly = 2) { device.captureApprovalScreen() }
         verify(exactly = 1) { device.clickNode(node, approved.packageName) }
         coVerify(exactly = 0) { device.tap(any(), any()) }
@@ -210,6 +213,41 @@ class ToolRequestHandlerSafetyTest {
         }
         verify(exactly = 0) { device.clickNode(any(), any()) }
         coVerify(exactly = 0) { device.inputTextAt(any(), any(), any(), any()) }
+    }
+
+    @Test fun `first consent waits for external screen restoration within one hidden phase`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        mockkObject(ActionConfirmation)
+        coEvery { ActionConfirmation.ask(any(), any(), any(), any()) } returns true
+        val device = controller()
+        every { device.captureApprovalScreen() } returnsMany listOf(approved, null, null, approved, approved)
+        val observations = UiObservationRegistry(makeId = { "observation-one" })
+        observations.record(approved, setOf("0"))
+        val visibility = mutableListOf<Boolean>()
+        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), { visibility.add(it) }, {}, observations = observations)
+        val started = testScheduler.currentTime
+        assertTrue(handler.handle(request()).success)
+        assertEquals(250L, testScheduler.currentTime - started)
+        assertEquals(listOf(false, true), visibility)
+        coVerify(exactly = 1) { ActionConfirmation.ask(any(), any(), any(), any()) }
+        coVerify(exactly = 1) { device.tap(10f, 20f) }
+    }
+
+    @Test fun `failed action restores overlay and next request starts a fresh hidden phase`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        mockkObject(ActionConfirmation)
+        val device = controller()
+        every { ActionConfirmation.isDeviceAccessGranted(any()) } returns true
+        every { device.captureApprovalScreen() } returns null
+        val visibility = mutableListOf<Boolean>()
+        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), { visibility.add(it) }, {})
+        val started = testScheduler.currentTime
+        assertFalse(handler.handle(request()).success)
+        assertFalse(handler.handle(request()).success)
+        assertEquals(300L, testScheduler.currentTime - started)
+        assertEquals(listOf(false, true, false, true), visibility)
+        coVerify(exactly = 0) { device.tap(any(), any()) }
+        coVerify(exactly = 0) { ActionConfirmation.ask(any(), any(), any(), any()) }
     }
 
 }

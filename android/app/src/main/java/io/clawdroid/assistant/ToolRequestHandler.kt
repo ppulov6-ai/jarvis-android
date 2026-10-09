@@ -45,6 +45,8 @@ class ToolRequestHandler(
 ) {
 
     private val operationMutex = Mutex()
+    // Accessed only inside operationMutex; nested helpers share one hidden screen phase.
+    private var overlayHiddenDepth = 0
 
     private val actionHandlers: List<ActionHandler> = listOf(
         AlarmActionHandler(),
@@ -74,7 +76,11 @@ class ToolRequestHandler(
         val started = android.os.SystemClock.elapsedRealtime()
         io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "${category}_started")
         return try {
-            val result = operationMutex.withLock { handleInternal(request) }
+            val result = operationMutex.withLock {
+                if (request.action in setOf("tap", "swipe", "text", "keyevent") && deviceController.isAvailable)
+                    withOverlayHidden { handleInternal(request) }
+                else handleInternal(request)
+            }
             io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "${category}_${if (result.success) "success" else "error"}", durationMs = (android.os.SystemClock.elapsedRealtime() - started).coerceIn(0, 86400000))
             result
         } catch (error: CancellationException) {
@@ -107,11 +113,11 @@ class ToolRequestHandler(
             if (targetPath != null && approvedTarget == null) return observationRejected(request)
             val remembered = ActionConfirmation.canRemember(request.action) && ActionConfirmation.isDeviceAccessGranted(context)
             if (ActionSafetyPolicy.requiresConfirmation(request.action)) {
-                val approved = try {
-                    withContext(Dispatchers.Main) { setOverlayVisibility(false) }
+                val approved = if (remembered) true else try {
+                    if (overlayHiddenDepth == 0) withContext(Dispatchers.Main) { setOverlayVisibility(false) }
                     ActionConfirmation.ask(context, request, onStop, approvedScreen?.description)
                 } finally {
-                    withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
+                    if (overlayHiddenDepth == 0) withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
                 }
                 currentCoroutineContext().ensureActive()
                 if (approved && guarded && !remembered) {
@@ -213,12 +219,16 @@ class ToolRequestHandler(
     }
 
     private suspend fun <T> withOverlayHidden(block: suspend () -> T): T {
+        val outer = overlayHiddenDepth++ == 0
         return try {
-            withContext(Dispatchers.Main) { setOverlayVisibility(false) }
-            delay(150)
+            if (outer) {
+                withContext(Dispatchers.Main) { setOverlayVisibility(false) }
+                delay(150)
+            }
             block()
         } finally {
-            withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
+            overlayHiddenDepth--
+            if (outer) withContext(NonCancellable + Dispatchers.Main) { setOverlayVisibility(true) }
         }
     }
 
