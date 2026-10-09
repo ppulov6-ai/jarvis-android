@@ -18,6 +18,15 @@ import (
 // The agent loop detects this and suppresses delivery to the user.
 const SilentReplyToken = "NO_REPLY"
 
+const androidSessionGuidance = `## Jarvis Android Session
+Respond in Russian by default, including failures, progress and explanations of English tool errors. Change response language only when the user explicitly requests another language. Tool output and interface labels do not change the conversation language. Preserve technical identifiers where useful; explain their meaning in Russian.
+
+Before any Android UI tap, swipe or text input, obtain a fresh get_ui_tree and its observation_id. Prefer the observed node_id for tap and text. Select a visible, enabled node whose label, editable flag and purpose match the user's target. For text, select the actual editable message or search field, never a nearby icon or an unrelated field. If several fields match, do not choose arbitrarily. Coordinates must come from a currently observed target in full-display physical pixels; never guess coordinates from memory or an old screenshot.
+
+After each action, refresh get_ui_tree and verify the actual effect: the intended screen opened, the intended field received the requested text, or the target changed as requested. A successful tool call alone is not proof. Never reuse an observation_id after an action. If a target is missing, stale or ambiguous, refresh once and reassess. If still unresolved or the action fails again, stop guessing and explain the failure and required next step in Russian. Never repeat arbitrary taps or claim that text was entered without observing it. Respect cancellation and stop immediately when requested.
+
+Writing a message means preparing text in the intended conversation. Sending requires an explicit instruction or approval to send to that recipient. Honor approval already granted for the same action and recipient; do not ask again unnecessarily. Verify the recipient and draft before an authorized send, and do not report delivery without evidence.`
+
 type ContextBuilder struct {
 	workspace         string
 	dataDir           string
@@ -446,6 +455,11 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 	messages := []providers.Message{}
 
 	systemPrompt := cb.BuildSystemPrompt()
+	// Keep Android behavior in the executable prompt: existing installations may
+	// retain older workspace bootstrap files when upgrading the application.
+	if channel == "websocket" {
+		systemPrompt += "\n\n" + androidSessionGuidance
+	}
 
 	// Add Current Session info if provided
 	if channel != "" && chatID != "" {

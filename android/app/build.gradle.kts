@@ -26,8 +26,8 @@ android {
         applicationId = "ru.pulat.jarvis"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 9
-        versionName = "0.4.3"
+        versionCode = 10
+        versionName = "0.4.4"
     }
 
     signingConfigs {
