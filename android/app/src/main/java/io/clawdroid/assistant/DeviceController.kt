@@ -104,38 +104,44 @@ class DeviceController {
     suspend fun inputText(text: String, expectedPackage: String? = null): Boolean {
         val svc = service ?: return false
         val ownPackage = svc.packageName
-        // Search non-overlay windows for the focused input field
-        val focusedNode = svc.windows
-            .filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
-            .firstNotNullOfOrNull { win ->
-                val root = win.root ?: return@firstNotNullOfOrNull null
-                if (root.packageName?.toString() == ownPackage) return@firstNotNullOfOrNull null
-                if (expectedPackage != null && root.packageName?.toString() != expectedPackage) return@firstNotNullOfOrNull null
-                root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            } ?: return false
-        if (focusedNode.isPassword || (expectedPackage != null && focusedNode.packageName?.toString() != expectedPackage)) return false
+        // Prefer the foreground root; window enumeration can be transiently empty.
+        val activeRoot = svc.rootInActiveWindow ?: return false
+        val activePackage = activeRoot.packageName?.toString() ?: return false
+        if (activePackage == ownPackage || (expectedPackage != null && activePackage != expectedPackage)) return false
+        val focusedNode = findInputField(activeRoot, ownPackage, expectedPackage) ?: return false
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
         return focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
+    internal fun findInputField(root: AccessibilityNodeInfo, ownPackage: String, expectedPackage: String?): AccessibilityNodeInfo? {
+        val packageName = root.packageName?.toString() ?: return null
+        if (packageName == ownPackage || (expectedPackage != null && packageName != expectedPackage)) return null
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
+        if (!focused.isVisibleToUser || !focused.isEnabled || !focused.isEditable || focused.isPassword) return null
+        if (focused.packageName?.toString() != packageName) return null
+        if (focused.actionList.none { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT }) return null
+        return focused
+    }
+
     private suspend fun dispatchGesture(
         svc: AccessibilityService,
         gesture: GestureDescription
     ): Boolean = suspendCancellableCoroutine { cont ->
-        svc.dispatchGesture(
+        val accepted = svc.dispatchGesture(
             gesture,
             object : AccessibilityService.GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
-                    cont.resume(true)
+                    if (cont.isActive) cont.resume(true)
                 }
 
                 override fun onCancelled(gestureDescription: GestureDescription?) {
-                    cont.resume(false)
+                    if (cont.isActive) cont.resume(false)
                 }
             },
             null
         )
+        if (!accepted && cont.isActive) cont.resume(false)
     }
 }
