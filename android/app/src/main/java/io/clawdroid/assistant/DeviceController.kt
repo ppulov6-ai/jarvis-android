@@ -35,7 +35,7 @@ class DeviceController {
         val path = Path().apply { moveTo(x, y) }
         val stroke = GestureDescription.StrokeDescription(path, 0, 100)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        return withTimeoutOrNull(8_000) { dispatchGesture(svc, gesture) } ?: false
+        return dispatchGesture(svc, gesture)
     }
 
     suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 300): Boolean {
@@ -47,7 +47,7 @@ class DeviceController {
         }
         val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        return withTimeoutOrNull(8_000) { dispatchGesture(svc, gesture) } ?: false
+        return dispatchGesture(svc, gesture)
     }
 
     fun pressBack(): Boolean {
@@ -165,10 +165,10 @@ class DeviceController {
         return focused
     }
 
-    private suspend fun dispatchGesture(
+    internal suspend fun dispatchGesture(
         svc: AccessibilityService,
         gesture: GestureDescription
-    ): Boolean = suspendCancellableCoroutine { cont ->
+    ): Boolean = withTimeoutOrNull(8_000) { suspendCancellableCoroutine<Boolean> { cont ->
         val accepted = svc.dispatchGesture(
             gesture,
             object : AccessibilityService.GestureResultCallback() {
@@ -183,5 +183,5 @@ class DeviceController {
             null
         )
         if (!accepted && cont.isActive) cont.resume(false)
-    }
+    } } ?: false
 }
