@@ -391,6 +391,9 @@ class ToolRequestHandler(
         sb.append(" bounds=$bounds")
         // Only output non-default values: clickable=true (default is false), enabled=false (default is true)
         if (node.isClickable) sb.append(" clickable")
+        if (node.isEditable) sb.append(" editable")
+        if (node.isFocused) sb.append(" focused")
+        if (!node.isPassword && node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT }) sb.append(" supports_set_text")
         if (!node.isEnabled) sb.append(" enabled=false")
         node.viewIdResourceName?.let { sb.append(" id=$it") }
 
