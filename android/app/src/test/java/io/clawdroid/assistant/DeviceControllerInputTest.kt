@@ -47,6 +47,7 @@ class DeviceControllerInputTest {
     @Test fun `unsupported or foreign node is rejected`() {
         every { field.actionList } returns emptyList()
         assertNull(controller.findInputField(root, "ru.pulat.jarvis", null))
+        every { field.actionList } returns listOf(mockk { every { id } returns AccessibilityNodeInfo.ACTION_SET_TEXT })
         every { field.packageName } returns "com.other.app"
         assertNull(controller.findInputField(root, "ru.pulat.jarvis", null))
     }
