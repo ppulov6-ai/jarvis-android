@@ -15,6 +15,9 @@ object DiagnosticEvents {
     private var store: AtomicFile? = null
     private val components = setOf("openai", "tool", "assistant", "websocket")
     private val codes = setOf("local_contacts", "local_dial", "local_screenshot", "save_failure", "connection_started", "connected", "disconnected", "authentication", "quota", "network", "model", "region", "permission", "rate_limit", "local_gateway_auth", "local_gateway_network", "invalid_request", "context", "upstream", "unknown", "started", "stopped", "success", "error", "cancelled", "screenshot_secure_window", "screenshot_interval", "screenshot_access_denied", "screenshot_capture_error", "screenshot_started", "screenshot_success", "screenshot_error", "screenshot_cancelled", "ui_started", "ui_success", "ui_error", "ui_cancelled", "other_started", "other_success", "other_error", "other_cancelled")
+    private val uiCodes = setOf("tap", "swipe", "text", "keyevent", "get_ui_tree").flatMap { action ->
+        setOf("started", "success", "error", "cancelled").map { "ui_${action}_$it" }
+    }.toSet() + setOf("ui_observation_rejected", "ui_screen_changed")
     @Synchronized fun initialize(context: Context) {
         if (store != null) return
         store = AtomicFile(File(context.filesDir, "test-diagnostics.json"))
@@ -24,7 +27,7 @@ object DiagnosticEvents {
         (saved + current).filter { valid(it) }.takeLast(200).forEach { events.addLast(it) }
         persist()
     }
-    private fun valid(event: Event) = event.component in components && event.code in codes && (event.status == null || event.status in 100..599) && (event.durationMs == null || event.durationMs in 0..86400000)
+    private fun valid(event: Event) = event.component in components && (event.code in codes || event.code in uiCodes) && (event.status == null || event.status in 100..599) && (event.durationMs == null || event.durationMs in 0..86400000)
     @Synchronized fun record(component: String, code: String, status: Int? = null, durationMs: Long? = null) {
         val event = Event(System.currentTimeMillis(), component, code, status, durationMs)
         require(valid(event)) { "Invalid diagnostic category" }

@@ -22,6 +22,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -38,8 +40,11 @@ class ToolRequestHandler(
     private val screenshotSource: ScreenshotSource,
     private val setOverlayVisibility: (Boolean) -> Unit,
     private val onAccessibilityNeeded: () -> Unit,
-    private val onStop: () -> Unit = {}
+    private val onStop: () -> Unit = {},
+    private val observations: UiObservationRegistry = UiObservationRegistry()
 ) {
+
+    private val operationMutex = Mutex()
 
     private val actionHandlers: List<ActionHandler> = listOf(
         AlarmActionHandler(),
@@ -63,13 +68,13 @@ class ToolRequestHandler(
     suspend fun handle(request: ToolRequest): ToolResponse {
         val category = when (request.action) {
             "screenshot" -> "screenshot"
-            "tap", "swipe", "text", "keyevent", "get_ui_tree" -> "ui"
+            "tap", "swipe", "text", "keyevent", "get_ui_tree" -> "ui_${request.action}"
             else -> "other"
         }
         val started = android.os.SystemClock.elapsedRealtime()
         io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "${category}_started")
         return try {
-            val result = handleInternal(request)
+            val result = operationMutex.withLock { handleInternal(request) }
             io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "${category}_${if (result.success) "success" else "error"}", durationMs = (android.os.SystemClock.elapsedRealtime() - started).coerceIn(0, 86400000))
             result
         } catch (error: CancellationException) {
@@ -81,6 +86,7 @@ class ToolRequestHandler(
     private suspend fun handleInternal(request: ToolRequest): ToolResponse {
         return try {
             currentCoroutineContext().ensureActive()
+            if (request.action !in setOf("get_ui_tree", "screenshot", "tap", "swipe", "text", "search_apps", "app_info", "search_contacts", "get_contact_detail")) observations.clear()
             val guarded = request.action in setOf("tap", "swipe", "text", "keyevent")
             if (guarded) requireAccessibility(request)?.let { return it }
             val approvedScreen = if (guarded) withOverlayHidden {
@@ -309,8 +315,11 @@ class ToolRequestHandler(
         val maxNodes = request.params?.get("max_nodes")?.jsonPrimitive?.intOrNull?.coerceIn(1, 300) ?: 300
 
         return withOverlayHidden {
+            observations.clear()
+            val before = deviceController.captureApprovalScreen()
+                ?: return@withOverlayHidden ToolResponse(request.requestId, false, error = "Не удалось прочитать стабильный экран приложения. Остановитесь и сообщите об этом пользователю по-русски.")
             val root = deviceController.getRootNode()
-                ?: return@withOverlayHidden ToolResponse(request.requestId, false, error = "Could not get UI tree")
+                ?: return@withOverlayHidden ToolResponse(request.requestId, false, error = "Не удалось получить элементы экрана")
             val startNode = resolveStartNode(root, resourceId, index, boundsX, boundsY)
                 ?: return@withOverlayHidden ToolResponse(request.requestId, false, error = buildString {
                     if (resourceId != null) append("No node found with resource_id=$resourceId (index=$index)")
@@ -318,11 +327,17 @@ class ToolRequestHandler(
                 })
             val sb = StringBuilder()
             val nodeCount = intArrayOf(0)
-            dumpNode(startNode, sb, 0, maxDepth, maxNodes, nodeCount)
+            val paths = mutableSetOf<String>()
+            val startPath = findNodePath(root, startNode)
+                ?: return@withOverlayHidden ToolResponse(request.requestId, false, error = "Выбранный элемент уже изменился. Получите новое дерево экрана.")
+            dumpNode(startNode, sb, 0, maxDepth, maxNodes, nodeCount, startPath, paths)
             if (nodeCount[0] >= maxNodes) {
                 sb.appendLine("[truncated: max_nodes=$maxNodes reached]")
             }
-            ToolResponse(request.requestId, true, result = sb.toString())
+            if (!ScreenApprovalGuard.matches(before, deviceController.captureApprovalScreen())) return@withOverlayHidden changedScreen(request)
+            val observationId = observations.record(before, paths)
+            val size = deviceController.screenSize()
+            ToolResponse(request.requestId, true, result = "observation_id=$observationId\nРазмер полного экрана: ${size?.first}x${size?.second}; координаты в физических пикселях. Используйте node_id. После действия получите новое дерево.\n$sb")
         }
     }
 
@@ -357,13 +372,29 @@ class ToolRequestHandler(
         return node
     }
 
+    private fun findNodePath(root: AccessibilityNodeInfo, target: AccessibilityNodeInfo): String? {
+        var count = 0
+        fun visit(node: AccessibilityNodeInfo, path: String, depth: Int): String? {
+            if (++count > 2000 || depth > 49) return null
+            if (node == target) return path
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                visit(child, "$path.$i", depth + 1)?.let { return it }
+            }
+            return null
+        }
+        return visit(root, "0", 0)
+    }
+
     private fun dumpNode(
         node: AccessibilityNodeInfo,
         sb: StringBuilder,
         depth: Int,
         maxDepth: Int,
         maxNodes: Int,
-        nodeCount: IntArray
+        nodeCount: IntArray,
+        path: String,
+        paths: MutableSet<String>
     ) {
         if (nodeCount[0] >= maxNodes) return
         // Skip invisible nodes
@@ -379,7 +410,8 @@ class ToolRequestHandler(
             .removePrefix("android.widget.")
             .removePrefix("android.view.")
 
-        sb.append("${indent}[${shortClass}]")
+        paths.add(path)
+        sb.append("${indent}[${shortClass}] node_id=$path")
 
         // Only output non-empty fields
         if (node.isPassword) {
@@ -408,73 +440,88 @@ class ToolRequestHandler(
         for (i in 0 until node.childCount) {
             if (nodeCount[0] >= maxNodes) return
             val child = node.getChild(i) ?: continue
-            dumpNode(child, sb, depth + 1, maxDepth, maxNodes, nodeCount)
+            dumpNode(child, sb, depth + 1, maxDepth, maxNodes, nodeCount, "$path.$i", paths)
         }
     }
 
+    private fun observationRejected(request: ToolRequest): ToolResponse {
+        io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "ui_observation_rejected")
+        return ToolResponse(request.requestId, false, error = "Наблюдение экрана отсутствует, устарело или элемент изменился. Получите get_ui_tree и используйте его observation_id и node_id. Не угадывайте координаты.")
+    }
+
+    private fun consumeObservation(request: ToolRequest, screen: ApprovedScreen?, path: String? = null): Boolean =
+        observations.consume(request.params?.get("observation_id")?.jsonPrimitive?.contentOrNull, screen, path)
+
     private suspend fun handleTap(request: ToolRequest, approvedScreen: ApprovedScreen?): ToolResponse {
         requireAccessibility(request)?.let { return it }
-
+        val path = request.params?.get("node_id")?.jsonPrimitive?.contentOrNull
         val x = request.params?.get("x")?.jsonPrimitive?.doubleOrNull?.toFloat()
-            ?: return ToolResponse(request.requestId, false, error = "x coordinate required")
         val y = request.params?.get("y")?.jsonPrimitive?.doubleOrNull?.toFloat()
-            ?: return ToolResponse(request.requestId, false, error = "y coordinate required")
-
+        if ((path != null && (request.params?.containsKey("x") == true || request.params?.containsKey("y") == true)) || (path == null && (x == null || y == null)))
+            return ToolResponse(request.requestId, false, error = "Укажите node_id либо пару координат x,y свежего дерева экрана")
         return withOverlayHidden {
-            val success = ScreenApprovalGuard.execute(approvedScreen, deviceController.captureApprovalScreen()) {
+            val current = deviceController.captureApprovalScreen()
+            if (!ScreenApprovalGuard.matches(approvedScreen, current)) return@withOverlayHidden changedScreen(request)
+            if (!consumeObservation(request, current, path)) return@withOverlayHidden observationRejected(request)
+            val success = if (path != null) {
+                val node = deviceController.resolveNode(path, current!!.packageName)
+                    ?: return@withOverlayHidden observationRejected(request)
+                currentCoroutineContext().ensureActive()
+                deviceController.clickNode(node, current.packageName)
+            } else {
+                if (!coordinatesInDisplay(x!!, y!!, deviceController.screenSize()))
+                    return@withOverlayHidden ToolResponse(request.requestId, false, error = "Координаты за пределами полного экрана. Не выполняйте случайные нажатия.")
                 currentCoroutineContext().ensureActive()
                 deviceController.tap(x, y)
-            } ?: return@withOverlayHidden changedScreen(request)
-            ToolResponse(
-                request.requestId, success,
-                result = if (success) "Tapped at ($x, $y)" else null,
-                error = if (!success) "Tap failed" else null
-            )
+            }
+            ToolResponse(request.requestId, success,
+                result = if (success) "Android выполнил нажатие. Получите новое дерево и проверьте, что открыт нужный экран." else null,
+                error = if (!success) "Android отклонил нажатие на выбранный элемент. Остановитесь; не нажимайте в других местах наугад." else null)
         }
     }
 
     private suspend fun handleSwipe(request: ToolRequest, approvedScreen: ApprovedScreen?): ToolResponse {
         requireAccessibility(request)?.let { return it }
-
         val x = request.params?.get("x")?.jsonPrimitive?.doubleOrNull?.toFloat()
-            ?: return ToolResponse(request.requestId, false, error = "x coordinate required")
         val y = request.params?.get("y")?.jsonPrimitive?.doubleOrNull?.toFloat()
-            ?: return ToolResponse(request.requestId, false, error = "y coordinate required")
         val x2 = request.params?.get("x2")?.jsonPrimitive?.doubleOrNull?.toFloat()
-            ?: return ToolResponse(request.requestId, false, error = "x2 coordinate required")
         val y2 = request.params?.get("y2")?.jsonPrimitive?.doubleOrNull?.toFloat()
-            ?: return ToolResponse(request.requestId, false, error = "y2 coordinate required")
+        if (request.params?.containsKey("node_id") == true || (request.params?.containsKey("duration_ms") == true && request.params["duration_ms"]?.jsonPrimitive?.longOrNull == null))
+            return ToolResponse(request.requestId, false, error = "Некорректные параметры жеста")
         val durationMs = request.params?.get("duration_ms")?.jsonPrimitive?.longOrNull ?: 300L
-
+        if (x == null || y == null || x2 == null || y2 == null || durationMs !in 50..5000)
+            return ToolResponse(request.requestId, false, error = "Нужны координаты жеста и длительность от 50 до 5000 мс")
         return withOverlayHidden {
-            val success = ScreenApprovalGuard.execute(approvedScreen, deviceController.captureApprovalScreen()) {
-                currentCoroutineContext().ensureActive()
-                deviceController.swipe(x, y, x2, y2, durationMs)
-            } ?: return@withOverlayHidden changedScreen(request)
-            ToolResponse(
-                request.requestId, success,
-                result = if (success) "Swiped from ($x,$y) to ($x2,$y2)" else null,
-                error = if (!success) "Swipe failed" else null
-            )
+            val current = deviceController.captureApprovalScreen()
+            if (!ScreenApprovalGuard.matches(approvedScreen, current)) return@withOverlayHidden changedScreen(request)
+            if (!consumeObservation(request, current)) return@withOverlayHidden observationRejected(request)
+            val size = deviceController.screenSize()
+            if (!coordinatesInDisplay(x, y, size) || !coordinatesInDisplay(x2, y2, size))
+                return@withOverlayHidden ToolResponse(request.requestId, false, error = "Координаты жеста за пределами полного экрана")
+            currentCoroutineContext().ensureActive()
+            val success = deviceController.swipe(x, y, x2, y2, durationMs)
+            ToolResponse(request.requestId, success, result = if (success) "Жест выполнен. Получите новое дерево экрана." else null,
+                error = if (!success) "Android отклонил или прервал жест. Остановитесь и сообщите об ошибке по-русски." else null)
         }
     }
 
     private suspend fun handleText(request: ToolRequest, approvedScreen: ApprovedScreen?): ToolResponse {
         requireAccessibility(request)?.let { return it }
-
         val text = request.params?.get("text")?.jsonPrimitive?.contentOrNull
-            ?: return ToolResponse(request.requestId, false, error = "text required")
-
+            ?: return ToolResponse(request.requestId, false, error = "Не указан текст для ввода")
+        val path = request.params?.get("node_id")?.jsonPrimitive?.contentOrNull
+        if (setOf("x", "y", "x2", "y2").any { request.params?.containsKey(it) == true })
+            return ToolResponse(request.requestId, false, error = "Ввод текста выполняется по node_id поля, без координат")
         return withOverlayHidden {
-            val success = ScreenApprovalGuard.execute(approvedScreen, deviceController.captureApprovalScreen()) {
-                currentCoroutineContext().ensureActive()
-                deviceController.inputText(text, approvedScreen?.packageName)
-            } ?: return@withOverlayHidden changedScreen(request)
-            ToolResponse(
-                request.requestId, success,
-                result = if (success) "Text input: $text" else null,
-                error = if (!success) "Text input failed (no focused input field?)" else null
-            )
+            val current = deviceController.captureApprovalScreen()
+            if (!ScreenApprovalGuard.matches(approvedScreen, current)) return@withOverlayHidden changedScreen(request)
+            if (!consumeObservation(request, current, path)) return@withOverlayHidden observationRejected(request)
+            currentCoroutineContext().ensureActive()
+            when (deviceController.inputTextAt(text, current!!.packageName, path)) {
+                DeviceController.TextOutcome.VERIFIED -> ToolResponse(request.requestId, true, result = "Текст введён в выбранное поле и проверен. Сообщение ещё не отправлено.")
+                DeviceController.TextOutcome.REJECTED -> ToolResponse(request.requestId, false, error = "Выбранное поле недоступно для ввода. Найдите editable supports_set_text в новом дереве. Не нажимайте в других местах наугад.")
+                DeviceController.TextOutcome.UNVERIFIED -> ToolResponse(request.requestId, false, error = "Команда ввода выполнена, но содержимое поля подтвердить не удалось. Не повторяйте ввод и не отправляйте сообщение; сообщите об этом пользователю по-русски.")
+            }
         }
     }
 
@@ -500,9 +547,11 @@ class ToolRequestHandler(
         }
     }
 
-    private fun changedScreen(request: ToolRequest) = ToolResponse(
-        request.requestId, false, error = "Экран приложения изменился после подтверждения. Действие отменено; запросите новое подтверждение"
-    )
+    private fun changedScreen(request: ToolRequest): ToolResponse {
+        observations.clear()
+        io.clawdroid.diagnostics.DiagnosticEvents.record("tool", "ui_screen_changed")
+        return ToolResponse(request.requestId, false, error = "Экран приложения изменился. Действие отменено; получите новое дерево экрана. Сохранённое разрешение повторно запрашивать не нужно.")
+    }
 
     private fun handleBroadcast(request: ToolRequest): ToolResponse {
         val action = request.params?.get("intent_action")?.jsonPrimitive?.contentOrNull

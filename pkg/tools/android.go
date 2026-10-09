@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+ "math"
 	"regexp"
 	"strings"
 	"time"
@@ -16,6 +17,8 @@ import (
 const androidToolTimeout = 75 * time.Second
 
 var (
+ observationIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+ nodeIDRe = regexp.MustCompile(`^0(\.[0-9]{1,4})*$`)
 	packageNameRe  = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)*$`)
 	intentActionRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_.]*$`)
 )
@@ -159,37 +162,57 @@ func (t *AndroidTool) validateAndBuildParams(action string, args map[string]inte
 			params["max_nodes"] = mnInt
 		}
 
-	case "tap":
-		x, xOk := toFloat64(args["x"])
-		y, yOk := toFloat64(args["y"])
-		if !xOk || !yOk {
-			return nil, fmt.Errorf("tap requires x and y coordinates")
-		}
-		params["x"] = x
-		params["y"] = y
-
-	case "swipe":
-		x, xOk := toFloat64(args["x"])
-		y, yOk := toFloat64(args["y"])
-		x2, x2Ok := toFloat64(args["x2"])
-		y2, y2Ok := toFloat64(args["y2"])
-		if !xOk || !yOk || !x2Ok || !y2Ok {
-			return nil, fmt.Errorf("swipe requires x, y, x2, y2 coordinates")
-		}
-		params["x"] = x
-		params["y"] = y
-		params["x2"] = x2
-		params["y2"] = y2
-		if dur, ok := toFloat64(args["duration_ms"]); ok {
-			params["duration_ms"] = int(dur)
-		}
-
-	case "text":
-		text, _ := args["text"].(string)
-		if text == "" {
-			return nil, fmt.Errorf("text action requires text parameter")
-		}
-		params["text"] = text
+	case "tap", "swipe", "text":
+        observation, ok := args["observation_id"].(string)
+        if !ok || !observationIDRe.MatchString(observation) {
+            return nil, fmt.Errorf("%s requires a valid observation_id from a fresh get_ui_tree", action)
+        }
+        params["observation_id"] = observation
+        node, hasNode := args["node_id"]
+        if hasNode {
+            id, ok := node.(string)
+            if !ok || !nodeIDRe.MatchString(id) || strings.Count(id, ".") >= 50 {
+                return nil, fmt.Errorf("%s: invalid node_id", action)
+            }
+            params["node_id"] = id
+        }
+        _, hasX := args["x"]
+        _, hasY := args["y"]
+        _, hasX2 := args["x2"]
+        _, hasY2 := args["y2"]
+        if action == "text" {
+            if hasX || hasY || hasX2 || hasY2 {
+                return nil, fmt.Errorf("text accepts node_id or the safely focused field, not coordinates")
+            }
+            text, ok := args["text"].(string)
+            if !ok || text == "" { return nil, fmt.Errorf("text action requires text parameter") }
+            params["text"] = text
+            break
+        }
+        if action == "tap" && hasNode {
+            if hasX || hasY || hasX2 || hasY2 { return nil, fmt.Errorf("tap: node_id and coordinates are mutually exclusive") }
+            break
+        }
+        if action == "swipe" && hasNode { return nil, fmt.Errorf("swipe does not accept node_id") }
+        if action == "tap" && (hasX2 || hasY2) { return nil, fmt.Errorf("tap does not accept x2/y2") }
+        keys := []string{"x", "y"}
+        if action == "swipe" { keys = append(keys, "x2", "y2") }
+        for _, key := range keys {
+            value, ok := toFloat64(args[key])
+            if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+                return nil, fmt.Errorf("%s requires finite non-negative %s coordinates", action, key)
+            }
+            params[key] = value
+        }
+        if action == "swipe" {
+            if raw, exists := args["duration_ms"]; exists {
+                duration, ok := toFloat64(raw)
+                if !ok || math.IsNaN(duration) || math.IsInf(duration, 0) || duration < 50 || duration > 5000 || math.Trunc(duration) != duration {
+                    return nil, fmt.Errorf("swipe duration_ms must be an integer from 50 to 5000")
+                }
+                params["duration_ms"] = int(duration)
+            }
+        }
 
 	case "keyevent":
 		key, _ := args["key"].(string)

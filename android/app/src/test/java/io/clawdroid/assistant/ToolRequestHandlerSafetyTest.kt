@@ -18,10 +18,11 @@ class ToolRequestHandlerSafetyTest {
         unmockkAll()
         Dispatchers.resetMain()
     }
-    private fun request() = ToolRequest(requestId = "one", action = "tap", params = buildJsonObject { put("x", 10); put("y", 20) })
+    private fun request() = ToolRequest(requestId = "one", action = "tap", params = buildJsonObject { put("x", 10); put("y", 20); put("observation_id", "observation-one") })
     private val approved = ApprovedScreen("com.example.messages", "screen-one", 25)
     private fun controller() = mockk<DeviceController> {
         every { isAvailable } returns true
+        every { screenSize() } returns (1080 to 2400)
         every { captureApprovalScreen() } returns approved
         coEvery { tap(any(), any()) } returns true
     }
@@ -74,7 +75,9 @@ class ToolRequestHandlerSafetyTest {
         mockkObject(ActionConfirmation)
         coEvery { ActionConfirmation.ask(any(), any(), any(), any()) } returns true
         val device = controller()
-        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), {}, {})
+        val observations = UiObservationRegistry(makeId = { "observation-one" })
+        observations.record(approved, setOf("0"))
+        val handler = ToolRequestHandler(mockk<Context>(), device, mockk<ScreenshotSource>(), {}, {}, observations = observations)
         assertTrue(handler.handle(request()).success)
         coVerify(exactly = 1) { device.tap(10f, 20f) }
     }

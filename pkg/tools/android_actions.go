@@ -40,7 +40,7 @@ var allActions = []androidAction{
 
 	// ── UI Interaction (UIOnly) ──
 	{Name: "screenshot", Category: "ui", Desc: "Capture a screenshot of the current screen (no params)", UIOnly: true},
-	{Name: "get_ui_tree", Category: "ui", Desc: "Get the accessibility UI tree (optional: resource_id, index, bounds_x/bounds_y, max_depth, max_nodes)", UIOnly: true, Params: []androidParam{
+	{Name: "get_ui_tree", Category: "ui", Desc: "Get a fresh accessibility UI tree returning observation_id and per-node node_id. Refresh after every action; coordinates use full-display physical pixels (optional: resource_id, index, bounds_x/bounds_y, max_depth, max_nodes)", UIOnly: true, Params: []androidParam{
 		{Name: "resource_id", Type: "string", Desc: "View resource ID to start UI tree from (e.g. com.example:id/button)"},
 		{Name: "index", Type: "integer", Desc: "Which match to use when resource_id has multiple hits (default 0)"},
 		{Name: "bounds_x", Type: "number", Desc: "X coordinate to find the containing node (alternative to resource_id)"},
@@ -48,20 +48,25 @@ var allActions = []androidAction{
 		{Name: "max_depth", Type: "integer", Desc: "Maximum traversal depth (default 15)"},
 		{Name: "max_nodes", Type: "integer", Desc: "Maximum number of nodes to output (default 300)"},
 	}},
-	{Name: "tap", Category: "ui", Desc: "Tap a screen coordinate (requires x, y)", UIOnly: true, Params: []androidParam{
-		{Name: "x", Type: "number", Desc: "X coordinate", Required: true},
-		{Name: "y", Type: "number", Desc: "Y coordinate", Required: true},
-	}},
-	{Name: "swipe", Category: "ui", Desc: "Swipe between coordinates (requires x, y, x2, y2; optional duration_ms)", UIOnly: true, Params: []androidParam{
-		{Name: "x", Type: "number", Desc: "Start X coordinate", Required: true},
-		{Name: "y", Type: "number", Desc: "Start Y coordinate", Required: true},
-		{Name: "x2", Type: "number", Desc: "End X coordinate", Required: true},
-		{Name: "y2", Type: "number", Desc: "End Y coordinate", Required: true},
-		{Name: "duration_ms", Type: "integer", Desc: "Swipe duration in milliseconds (default 300)"},
-	}},
-	{Name: "text", Category: "ui", Desc: "Input text into the focused field (requires text)", UIOnly: true, Params: []androidParam{
-		{Name: "text", Type: "string", Desc: "Text to input", Required: true},
-	}},
+	{Name: "tap", Category: "ui", Desc: "Tap an observed node: prefer node_id from fresh get_ui_tree with observation_id. Alternatively use observed x,y in full-display physical pixels. Never guess coordinates; refresh after each action.", UIOnly: true, Params: []androidParam{
+        {Name: "observation_id", Type: "string", Desc: "UUID returned by fresh get_ui_tree; required for tap, swipe and text", Required: true},
+        {Name: "node_id", Type: "string", Desc: "Observed node path from get_ui_tree; tap accepts either node_id OR x,y, never both"},
+        {Name: "x", Type: "number", Desc: "Observed X in full-display physical pixels"},
+        {Name: "y", Type: "number", Desc: "Observed Y in full-display physical pixels"},
+    }},
+    {Name: "swipe", Category: "ui", Desc: "Swipe using fresh observation_id and observed full-display physical pixel coordinates. Refresh get_ui_tree afterwards.", UIOnly: true, Params: []androidParam{
+        {Name: "observation_id", Type: "string", Desc: "UUID returned by fresh get_ui_tree; required for tap, swipe and text", Required: true},
+        {Name: "x", Type: "number", Desc: "Start X in full-display physical pixels", Required: true},
+        {Name: "y", Type: "number", Desc: "Start Y in full-display physical pixels", Required: true},
+        {Name: "x2", Type: "number", Desc: "End X in full-display physical pixels", Required: true},
+        {Name: "y2", Type: "number", Desc: "End Y in full-display physical pixels", Required: true},
+        {Name: "duration_ms", Type: "integer", Desc: "Swipe duration in milliseconds, 1 to 10000 (default 300)"},
+    }},
+    {Name: "text", Category: "ui", Desc: "Input text with fresh observation_id and observed editable node_id. If node_id omitted, only a safe focused editable field is used. Never guess a field. Refresh get_ui_tree afterwards.", UIOnly: true, Params: []androidParam{
+        {Name: "observation_id", Type: "string", Desc: "UUID returned by fresh get_ui_tree; required for tap, swipe and text", Required: true},
+        {Name: "node_id", Type: "string", Desc: "Observed editable node path; omit only for safe focused editable field"},
+        {Name: "text", Type: "string", Desc: "Text to input", Required: true},
+    }},
 	{Name: "keyevent", Category: "ui", Desc: "Press a key (requires key: back/home/recents)", UIOnly: true, Params: []androidParam{
 		{Name: "key", Type: "string", Desc: "Key to press", Required: true, Enum: []string{"back", "home", "recents"}},
 	}},
